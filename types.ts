@@ -21,11 +21,15 @@ export interface UpcomingDose {
 }
 
 export interface Injection {
+    id?: string;
     date: string;
     day: string;
     dosage: string;
     notes: string;
     status: 'Aplicada' | 'Pulada';
+    doseValue?: number;        // Valor cobrado em R$
+    isHistorical?: boolean;    // Se foi inserida retroativamente
+    applicationDate?: string;  // Data real da aplicação (YYYY-MM-DD)
 }
 
 export interface MedicationStep {

@@ -1,8 +1,61 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Patient, MedicationStep, Injection } from '../types';
 import { supabase } from '../lib/supabase';
 import EditMedicationStepModal from './EditMedicationStepModal';
 import AddPatientModal from './AddPatientModal';
+import AddHistoricalDoseModal from './AddHistoricalDoseModal';
+
+// Financial Balance Card Component
+const FinancialBalanceCard: React.FC<{
+    totalDosesValue: number;
+    totalPaid: number;
+    doseCount: number;
+}> = ({ totalDosesValue, totalPaid, doseCount }) => {
+    const balance = totalDosesValue - totalPaid;
+    const balanceStatus = balance <= 0 ? 'quitado' : balance < 200 ? 'baixo' : 'pendente';
+
+    const statusColors = {
+        quitado: 'bg-green-50 border-green-200 text-green-700',
+        baixo: 'bg-amber-50 border-amber-200 text-amber-700',
+        pendente: 'bg-red-50 border-red-200 text-red-700'
+    };
+
+    const statusLabels = {
+        quitado: '✓ Quitado',
+        baixo: '⚠️ Saldo Baixo',
+        pendente: '⚠️ Pendente'
+    };
+
+    const formatCurrency = (value: number) => {
+        return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+
+    return (
+        <div className="bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
+            <div className="flex items-center gap-2 mb-4">
+                <span className="material-symbols-outlined text-emerald-500">account_balance_wallet</span>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Saldo Financeiro</h3>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="text-center p-3 bg-blue-50 dark:bg-slate-800 rounded-lg">
+                    <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Total Doses</p>
+                    <p className="text-lg font-bold text-blue-600">{formatCurrency(totalDosesValue)}</p>
+                    <p className="text-[10px] text-slate-400">{doseCount} aplicações</p>
+                </div>
+                <div className="text-center p-3 bg-green-50 dark:bg-slate-800 rounded-lg">
+                    <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Pagamentos</p>
+                    <p className="text-lg font-bold text-green-600">{formatCurrency(totalPaid)}</p>
+                </div>
+                <div className={`text-center p-3 rounded-lg border ${statusColors[balanceStatus]}`}>
+                    <p className="text-xs uppercase tracking-wider mb-1 opacity-70">Saldo</p>
+                    <p className="text-lg font-bold">{formatCurrency(Math.max(0, balance))}</p>
+                    <p className="text-[10px]">{statusLabels[balanceStatus]}</p>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const MedicationPath: React.FC<{ steps: MedicationStep[], onEditStep: (step: MedicationStep) => void, onAddStep: () => void }> = ({ steps, onEditStep, onAddStep }) => {
     const getIcon = (status: MedicationStep['status']) => {
@@ -55,12 +108,28 @@ const MedicationPath: React.FC<{ steps: MedicationStep[], onEditStep: (step: Med
     );
 };
 
-const InjectionHistoryTable: React.FC<{ injections: Injection[], onDelete: (id: string) => void }> = ({ injections, onDelete }) => {
+const InjectionHistoryTable: React.FC<{
+    injections: Injection[],
+    onDelete: (id: string) => void,
+    onAddHistorical: () => void
+}> = ({ injections, onDelete, onAddHistorical }) => {
+    const formatCurrency = (value: number) => {
+        if (!value) return '-';
+        return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+
     return (
         <div className="lg:col-span-2 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col">
             <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">Histórico de Aplicações</h3>
                 <div className="flex gap-2">
+                    <button
+                        onClick={onAddHistorical}
+                        className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 border border-amber-200 transition-colors flex items-center gap-1"
+                    >
+                        <span className="material-symbols-outlined text-sm">history</span>
+                        Adicionar Dose Histórica
+                    </button>
                     <button className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors">Exportar CSV</button>
                 </div>
             </div>
@@ -70,39 +139,58 @@ const InjectionHistoryTable: React.FC<{ injections: Injection[], onDelete: (id: 
                         <tr className="bg-slate-50 dark:bg-slate-800/50 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
                             <th className="px-6 py-4 font-semibold">Data</th>
                             <th className="px-6 py-4 font-semibold">Dosagem</th>
+                            <th className="px-6 py-4 font-semibold">Valor</th>
                             <th className="px-6 py-4 font-semibold">Notas</th>
                             <th className="px-6 py-4 font-semibold text-right">Status</th>
                             <th className="px-6 py-4 font-semibold text-right">Ação</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {injections.map((injection, index) => (
-                            <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
-                                <td className="px-6 py-4">
-                                    <div className="text-sm font-medium text-slate-900 dark:text-white">{injection.date}</div>
-                                    <div className="text-xs text-slate-500">{injection.day}</div>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <div className="text-sm text-slate-900 dark:text-white font-medium">{injection.dosage}</div>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <div className="text-sm text-slate-500 truncate max-w-[150px]">{injection.notes}</div>
-                                </td>
-                                <td className="px-6 py-4 text-right">
-                                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold ring-1 ring-inset ${injection.status === 'Aplicada' ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20' : 'bg-slate-50 text-slate-700 ring-slate-600/20'}`}>
-                                        {injection.status}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-right">
-                                    <button
-                                        onClick={() => injection.id && onDelete(injection.id)}
-                                        className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                    >
-                                        <span className="material-symbols-outlined text-lg">delete</span>
-                                    </button>
+                        {injections.length === 0 ? (
+                            <tr>
+                                <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
+                                    Nenhuma aplicação registrada
                                 </td>
                             </tr>
-                        ))}
+                        ) : (
+                            injections.map((injection, index) => (
+                                <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-2">
+                                            {injection.isHistorical && (
+                                                <span className="material-symbols-outlined text-amber-500 text-sm" title="Dose histórica">history</span>
+                                            )}
+                                            <div>
+                                                <div className="text-sm font-medium text-slate-900 dark:text-white">{injection.date}</div>
+                                                <div className="text-xs text-slate-500">{injection.day}</div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="text-sm text-slate-900 dark:text-white font-medium">{injection.dosage}</div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="text-sm font-mono text-slate-600">{formatCurrency(injection.doseValue || 0)}</div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="text-sm text-slate-500 truncate max-w-[150px]">{injection.notes}</div>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold ring-1 ring-inset ${injection.status === 'Aplicada' ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20' : 'bg-slate-50 text-slate-700 ring-slate-600/20'}`}>
+                                            {injection.status}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                        <button
+                                            onClick={() => injection.id && onDelete(injection.id)}
+                                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                        >
+                                            <span className="material-symbols-outlined text-lg">delete</span>
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -121,11 +209,13 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
     const [medicationSteps, setMedicationSteps] = useState<MedicationStep[]>([]);
     const [injections, setInjections] = useState<Injection[]>([]);
     const [loading, setLoading] = useState(true);
+    const [totalPaid, setTotalPaid] = useState(0);
 
     // Modals state
     const [isEditStepModalOpen, setIsEditStepModalOpen] = useState(false);
     const [selectedStep, setSelectedStep] = useState<MedicationStep | null>(null);
     const [isEditPatientModalOpen, setIsEditPatientModalOpen] = useState(false);
+    const [isHistoricalDoseModalOpen, setIsHistoricalDoseModalOpen] = useState(false);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -169,18 +259,33 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                 .order('created_at', { ascending: false });
 
             const formattedInjections = (injectionsData || []).map(inj => {
-                const date = new Date(inj.created_at);
+                const dateSource = inj.application_date || inj.created_at;
+                const date = new Date(dateSource);
                 return {
                     id: inj.id,
                     date: date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }),
                     day: date.toLocaleDateString('pt-BR', { weekday: 'long' }).replace(/^\w/, c => c.toUpperCase()),
                     dosage: inj.dosage,
                     notes: inj.notes,
-                    status: inj.status === 'Applied' ? 'Aplicada' : 'Pulada'
+                    status: inj.status === 'Applied' ? 'Aplicada' : 'Pulada',
+                    doseValue: inj.dose_value || 0,
+                    isHistorical: inj.is_historical || false,
+                    applicationDate: inj.application_date
                 } as Injection;
             });
 
             setInjections(formattedInjections);
+
+            // 4. Fetch payments for this patient
+            const { data: paymentsData } = await supabase
+                .from('financial_records')
+                .select('value')
+                .eq('patient_id', patient.id)
+                .eq('status', 'Paid');
+
+            const paidSum = (paymentsData || []).reduce((sum, p) => sum + (Number(p.value) || 0), 0);
+            setTotalPaid(paidSum);
+
         } catch (err) {
             console.error('Error fetching profile data:', err);
         } finally {
@@ -191,6 +296,12 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    // Calculate financial totals
+    const { totalDosesValue, doseCount } = useMemo(() => {
+        const total = injections.reduce((sum, inj) => sum + (inj.doseValue || 0), 0);
+        return { totalDosesValue: total, doseCount: injections.length };
+    }, [injections]);
 
     const handleEditStep = (step: MedicationStep) => {
         setSelectedStep(step);
@@ -208,7 +319,9 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
         try {
             const { error } = await supabase.from('injections').delete().eq('id', id);
             if (error) throw error;
-            fetchData();
+            requestAnimationFrame(() => {
+                fetchData();
+            });
         } catch (err) {
             alert('Erro ao excluir aplicação');
         }
@@ -216,6 +329,10 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
 
     const handleEditPatient = () => {
         setIsEditPatientModalOpen(true);
+    };
+
+    const handleAddHistoricalDose = () => {
+        setIsHistoricalDoseModalOpen(true);
     };
 
     if (loading && medicationSteps.length === 0) {
@@ -278,6 +395,13 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                 </div>
             </section>
 
+            {/* Financial Balance Card */}
+            <FinancialBalanceCard
+                totalDosesValue={totalDosesValue}
+                totalPaid={totalPaid}
+                doseCount={doseCount}
+            />
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-1 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
                     <div className="flex items-center justify-between mb-6">
@@ -292,6 +416,7 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                 <InjectionHistoryTable
                     injections={injections}
                     onDelete={handleDeleteInjection}
+                    onAddHistorical={handleAddHistoricalDose}
                 />
             </div>
 
@@ -304,21 +429,35 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
             </button>
 
             {/* Modals */}
-            <EditMedicationStepModal
-                isOpen={isEditStepModalOpen}
-                onClose={() => setIsEditStepModalOpen(false)}
-                onSuccess={fetchData}
-                patientId={patient.id}
-                stepToEdit={selectedStep}
-                nextOrderIndex={medicationSteps.length}
-            />
+            {isEditStepModalOpen && (
+                <EditMedicationStepModal
+                    isOpen={isEditStepModalOpen}
+                    onClose={() => setIsEditStepModalOpen(false)}
+                    onSuccess={fetchData}
+                    patientId={patient.id}
+                    stepToEdit={selectedStep}
+                    nextOrderIndex={medicationSteps.length}
+                />
+            )}
 
-            <AddPatientModal
-                isOpen={isEditPatientModalOpen}
-                onClose={() => setIsEditPatientModalOpen(false)}
-                onSuccess={fetchData}
-                patientToEdit={realPatient}
-            />
+            {isEditPatientModalOpen && (
+                <AddPatientModal
+                    isOpen={isEditPatientModalOpen}
+                    onClose={() => setIsEditPatientModalOpen(false)}
+                    onSuccess={fetchData}
+                    patientToEdit={realPatient}
+                />
+            )}
+
+            {isHistoricalDoseModalOpen && (
+                <AddHistoricalDoseModal
+                    isOpen={isHistoricalDoseModalOpen}
+                    onClose={() => setIsHistoricalDoseModalOpen(false)}
+                    onSuccess={fetchData}
+                    patientId={patient.id}
+                    patientName={realPatient.name}
+                />
+            )}
         </div>
     );
 };
