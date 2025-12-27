@@ -23,7 +23,12 @@ const GlobalRegisterDoseModal: React.FC<GlobalRegisterDoseModalProps> = ({ isOpe
     const [notes, setNotes] = useState('');
     const [sideEffects, setSideEffects] = useState('');
     const [injectionSite, setInjectionSite] = useState('Abdômen');
+    const [injectionSide, setInjectionSide] = useState<'Esquerdo' | 'Direito' | ''>('');
+    const [lastInjectionSide, setLastInjectionSide] = useState<string | null>(null);
     const [weight, setWeight] = useState('');
+    const [doseValue, setDoseValue] = useState('60');
+    const [isPaid, setIsPaid] = useState(false);
+    const [patientBalance, setPatientBalance] = useState(0);
     const [error, setError] = useState<string | null>(null);
 
     const searchRef = useRef<HTMLDivElement>(null);
@@ -83,6 +88,33 @@ const GlobalRegisterDoseModal: React.FC<GlobalRegisterDoseModalProps> = ({ isOpe
                     setTotalWeeks(16);
                 }
 
+                // Fetch last injection for side suggestion
+                // Try to extract side info from notes (fallback if column doesn't exist)
+                const { data: lastInjection } = await supabase
+                    .from('injections')
+                    .select('notes')
+                    .eq('patient_id', selectedPatient.id)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+
+                if (lastInjection && lastInjection.length > 0) {
+                    const notes = lastInjection[0].notes || '';
+                    // Check if notes contain side information
+                    if (notes.includes('[Lado: Direito]')) {
+                        setLastInjectionSide('Direito');
+                        setInjectionSide('Esquerdo');
+                    } else if (notes.includes('[Lado: Esquerdo]')) {
+                        setLastInjectionSide('Esquerdo');
+                        setInjectionSide('Direito');
+                    } else {
+                        setLastInjectionSide(null);
+                        setInjectionSide('');
+                    }
+                } else {
+                    setLastInjectionSide(null);
+                    setInjectionSide('');
+                }
+
                 setWeight(selectedPatient.current_weight?.toString() || '');
             } catch (err) {
                 console.error('Error fetching last dose:', err);
@@ -111,13 +143,20 @@ const GlobalRegisterDoseModal: React.FC<GlobalRegisterDoseModalProps> = ({ isOpe
             nextDoseDate.setDate(today.getDate() + 7);
 
             // 1. Register Injection
+            // Include side info in notes for now (until migration is run)
+            const fullNotes = injectionSide
+                ? `${notes}${notes ? ' ' : ''}[Lado: ${injectionSide}]`
+                : notes;
+
             const { error: injError } = await supabase.from('injections').insert([{
                 patient_id: selectedPatient.id,
                 dosage: formattedDosage,
-                notes: notes,
+                notes: fullNotes,
                 side_effects: sideEffects,
                 injection_site: injectionSite,
                 status: 'Applied',
+                dose_value: parseFloat(doseValue) || 0,
+                is_paid: isPaid,
                 user_id: user.id
             }]);
             if (injError) throw injError;
@@ -363,6 +402,37 @@ const GlobalRegisterDoseModal: React.FC<GlobalRegisterDoseModalProps> = ({ isOpe
                                 </div>
                             </div>
 
+                            {/* Side Selection (Left/Right) */}
+                            <div>
+                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Lado da Aplicação</label>
+                                {lastInjectionSide && (
+                                    <p className="text-xs text-amber-600 mb-2 flex items-center gap-1">
+                                        <span className="material-symbols-outlined text-sm">info</span>
+                                        Última aplicação: <strong>{lastInjectionSide}</strong> — Sugerido: <strong>{lastInjectionSide === 'Direito' ? 'Esquerdo' : 'Direito'}</strong>
+                                    </p>
+                                )}
+                                <div className="grid grid-cols-2 gap-2">
+                                    {['Esquerdo', 'Direito'].map(side => (
+                                        <button
+                                            key={side}
+                                            type="button"
+                                            onClick={() => setInjectionSide(side as 'Esquerdo' | 'Direito')}
+                                            className={`py-2.5 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2 ${injectionSide === side
+                                                ? 'bg-primary text-white border-primary shadow-md'
+                                                : injectionSide === ''
+                                                    ? 'border-slate-200 text-slate-400 hover:border-primary/50 bg-slate-50'
+                                                    : 'border-slate-200 text-slate-500 hover:border-primary/50'}`}
+                                        >
+                                            <span className="material-symbols-outlined text-sm">{side === 'Esquerdo' ? 'arrow_back' : 'arrow_forward'}</span>
+                                            {side}
+                                        </button>
+                                    ))}
+                                </div>
+                                {injectionSide === '' && (
+                                    <p className="text-[10px] text-slate-400 mt-1 italic">Primeira aplicação ou sem histórico de lado</p>
+                                )}
+                            </div>
+
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Efeitos Colaterais / Reações</label>
@@ -381,6 +451,45 @@ const GlobalRegisterDoseModal: React.FC<GlobalRegisterDoseModalProps> = ({ isOpe
                                         className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-primary/20 outline-none text-slate-900 dark:text-white h-20 resize-none text-sm"
                                         placeholder="Dificuldades de aplicação, relatos do paciente..."
                                     />
+                                </div>
+                            </div>
+
+                            {/* Payment Section */}
+                            <div className="p-4 bg-gradient-to-r from-emerald-50 to-green-50 dark:from-slate-800 dark:to-slate-800 rounded-xl border border-emerald-200 dark:border-slate-700">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <span className="material-symbols-outlined text-emerald-600">payments</span>
+                                    <label className="text-sm font-bold text-emerald-800 dark:text-emerald-400">Informações de Pagamento</label>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Valor da Dose</label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 font-mono">R$</span>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                min="0"
+                                                value={doseValue}
+                                                onChange={(e) => setDoseValue(e.target.value)}
+                                                className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 outline-none text-slate-900 dark:text-white text-sm font-mono"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="flex items-end">
+                                        <label className="flex-1 flex items-center gap-3 p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                                            <input
+                                                type="checkbox"
+                                                checked={isPaid}
+                                                onChange={(e) => setIsPaid(e.target.checked)}
+                                                className="w-5 h-5 text-green-600 rounded border-slate-300 focus:ring-green-500"
+                                            />
+                                            <div className="flex flex-col">
+                                                <span className={`text-sm font-bold ${isPaid ? 'text-green-700' : 'text-slate-600'}`}>
+                                                    {isPaid ? '✓ Pago' : 'Marcar como pago'}
+                                                </span>
+                                            </div>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                         </div>

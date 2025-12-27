@@ -30,6 +30,7 @@ export interface Injection {
     doseValue?: number;        // Valor cobrado em R$
     isHistorical?: boolean;    // Se foi inserida retroativamente
     applicationDate?: string;  // Data real da aplicação (YYYY-MM-DD)
+    isPaid?: boolean;          // Se o valor desta dose foi pago
 }
 
 export interface MedicationStep {

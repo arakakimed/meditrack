@@ -49,24 +49,25 @@ const AddHistoricalDoseModal: React.FC<AddHistoricalDoseModalProps> = ({
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('Usuário não autenticado');
 
-            // Create the injection record
+            // Create the injection record - include dose_value and is_paid
             const { error: insertError } = await supabase
                 .from('injections')
                 .insert([{
                     patient_id: patientId,
                     dosage: `${dosage} mg`,
-                    notes: notes || 'Dose histórica',
+                    notes: notes || `Dose histórica (${applicationDate})`,
                     status: 'Applied',
+                    created_at: new Date(applicationDate).toISOString(),
                     application_date: applicationDate,
                     dose_value: parseFloat(doseValue) || 0,
                     is_historical: true,
-                    created_at: new Date(applicationDate).toISOString(),
+                    is_paid: isPaid,
                     user_id: user.id
                 }]);
 
             if (insertError) throw insertError;
 
-            // If marked as paid, create a financial record
+            // If marked as paid, also create a financial record for tracking
             if (isPaid && parseFloat(doseValue) > 0) {
                 await supabase
                     .from('financial_records')
@@ -148,9 +149,9 @@ const AddHistoricalDoseModal: React.FC<AddHistoricalDoseModalProps> = ({
                     )}
 
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                        <p className="text-sm text-amber-800 flex items-start gap-2">
-                            <span className="material-symbols-outlined text-base mt-0.5">info</span>
-                            Use este formulário para registrar doses que foram aplicadas <strong>antes</strong> de usar este sistema.
+                        <p className="text-sm text-amber-800 flex items-center gap-2">
+                            <span className="material-symbols-outlined text-base flex-shrink-0">info</span>
+                            <span>Use este formulário para registrar doses aplicadas <strong>antes</strong> de usar o sistema.</span>
                         </p>
                     </div>
 

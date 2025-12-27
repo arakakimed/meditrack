@@ -4,30 +4,51 @@ import { supabase } from '../lib/supabase';
 import EditMedicationStepModal from './EditMedicationStepModal';
 import AddPatientModal from './AddPatientModal';
 import AddHistoricalDoseModal from './AddHistoricalDoseModal';
+import PaymentModal from './PaymentModal';
+import EditDoseModal from './EditDoseModal';
+import DosePaymentModal from './DosePaymentModal';
 
 // Financial Balance Card Component
 const FinancialBalanceCard: React.FC<{
     totalDosesValue: number;
     totalPaid: number;
     doseCount: number;
-}> = ({ totalDosesValue, totalPaid, doseCount }) => {
-    const balance = totalDosesValue - totalPaid;
-    const balanceStatus = balance <= 0 ? 'quitado' : balance < 200 ? 'baixo' : 'pendente';
+    paidDoseCount: number;
+}> = ({ totalDosesValue, totalPaid, doseCount, paidDoseCount }) => {
+    // Balance = Payments - Doses Value
+    // Positive = Credit (patient paid in advance)
+    // Zero = Settled
+    // Negative = Debt (patient owes money)
+    const balance = totalPaid - totalDosesValue;
+
+    const getBalanceStatus = () => {
+        if (balance > 0) return 'credit';
+        if (balance === 0) return 'settled';
+        return 'debt';
+    };
+
+    const balanceStatus = getBalanceStatus();
 
     const statusColors = {
-        quitado: 'bg-green-50 border-green-200 text-green-700',
-        baixo: 'bg-amber-50 border-amber-200 text-amber-700',
-        pendente: 'bg-red-50 border-red-200 text-red-700'
+        credit: 'bg-emerald-50 border-emerald-300 text-emerald-700',
+        settled: 'bg-green-50 border-green-200 text-green-700',
+        debt: 'bg-red-50 border-red-200 text-red-700'
     };
 
     const statusLabels = {
-        quitado: '✓ Quitado',
-        baixo: '⚠️ Saldo Baixo',
-        pendente: '⚠️ Pendente'
+        credit: '💰 Saldo Disponível',
+        settled: '✓ Quitado',
+        debt: '⚠️ Em Débito'
+    };
+
+    const statusIcons = {
+        credit: 'savings',
+        settled: 'check_circle',
+        debt: 'warning'
     };
 
     const formatCurrency = (value: number) => {
-        return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return `R$ ${Math.abs(value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
 
     return (
@@ -46,18 +67,31 @@ const FinancialBalanceCard: React.FC<{
                 <div className="text-center p-3 bg-green-50 dark:bg-slate-800 rounded-lg">
                     <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Pagamentos</p>
                     <p className="text-lg font-bold text-green-600">{formatCurrency(totalPaid)}</p>
+                    <p className="text-[10px] text-slate-400">{paidDoseCount} doses pagas</p>
                 </div>
-                <div className={`text-center p-3 rounded-lg border ${statusColors[balanceStatus]}`}>
+                <div className={`text-center p-3 rounded-lg border-2 ${statusColors[balanceStatus]}`}>
                     <p className="text-xs uppercase tracking-wider mb-1 opacity-70">Saldo</p>
-                    <p className="text-lg font-bold">{formatCurrency(Math.max(0, balance))}</p>
-                    <p className="text-[10px]">{statusLabels[balanceStatus]}</p>
+                    <div className="flex items-center justify-center gap-1">
+                        <span className="material-symbols-outlined text-lg">{statusIcons[balanceStatus]}</span>
+                        <p className="text-lg font-bold">
+                            {balanceStatus === 'debt' ? '-' : ''}{formatCurrency(balance)}
+                        </p>
+                    </div>
+                    <p className="text-[10px] font-medium">{statusLabels[balanceStatus]}</p>
                 </div>
             </div>
         </div>
     );
 };
 
-const MedicationPath: React.FC<{ steps: MedicationStep[], onEditStep: (step: MedicationStep) => void, onAddStep: () => void }> = ({ steps, onEditStep, onAddStep }) => {
+
+const MedicationPath: React.FC<{
+    steps: MedicationStep[],
+    onEditStep: (step: MedicationStep) => void,
+    onAddStep: () => void,
+    onPaymentClick: (step: MedicationStep) => void,
+    paidStepIds: Set<string>
+}> = ({ steps, onEditStep, onAddStep, onPaymentClick, paidStepIds }) => {
     const getIcon = (status: MedicationStep['status']) => {
         switch (status) {
             case 'Concluído': return 'check';
@@ -79,24 +113,45 @@ const MedicationPath: React.FC<{ steps: MedicationStep[], onEditStep: (step: Med
     return (
         <div className="relative pl-2">
             <div className="absolute top-2 left-[19px] bottom-6 w-0.5 bg-slate-200 dark:bg-slate-700"></div>
-            {steps.map((step, index) => (
-                <div key={index} className={`relative flex gap-4 mb-8 ${step.status === 'Bloqueado' ? 'opacity-60' : ''}`}>
-                    <div className={`relative z-10 flex items-center justify-center size-10 rounded-full ${getIconClasses(step.status)} cursor-pointer hover:scale-110 transition-transform`} onClick={() => onEditStep(step)}>
-                        <span className={`material-symbols-outlined text-lg ${step.status === 'Atual' && 'animate-pulse'}`}>{getIcon(step.status)}</span>
-                    </div>
-                    <div className="flex flex-col pt-1 flex-1">
-                        <div className="flex justify-between items-start">
-                            <span className={`text-sm font-bold ${step.status === 'Atual' ? 'text-primary' : 'text-slate-900 dark:text-white'}`}>{step.dosage}</span>
+            {steps.map((step, index) => {
+                const isPaid = step.id ? paidStepIds.has(step.id) : false;
+
+                return (
+                    <div key={index} className={`relative flex gap-3 mb-8 ${step.status === 'Bloqueado' ? 'opacity-60' : ''}`}>
+                        {/* Main step circle */}
+                        <div className={`relative z-10 flex items-center justify-center size-10 rounded-full ${getIconClasses(step.status)} cursor-pointer hover:scale-110 transition-transform`} onClick={() => onEditStep(step)}>
+                            <span className={`material-symbols-outlined text-lg ${step.status === 'Atual' && 'animate-pulse'}`}>{getIcon(step.status)}</span>
                         </div>
-                        <span className="text-xs text-slate-500 mb-1">{step.details}</span>
-                        {step.status === 'Atual' && step.progress && (
-                            <div className="w-32 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden mt-2">
-                                <div className="h-full bg-primary rounded-full" style={{ width: `${step.progress}%` }}></div>
+
+                        {/* Step info */}
+                        <div className="flex flex-col pt-1 flex-1 min-w-0">
+                            <div className="flex justify-between items-start">
+                                <span className={`text-sm font-bold ${step.status === 'Atual' ? 'text-primary' : 'text-slate-900 dark:text-white'}`}>{step.dosage}</span>
                             </div>
-                        )}
+                            <span className="text-xs text-slate-500 mb-1">{step.details}</span>
+                            {step.status === 'Atual' && step.progress && (
+                                <div className="w-32 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden mt-2">
+                                    <div className="h-full bg-primary rounded-full" style={{ width: `${step.progress}%` }}></div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Payment button */}
+                        <button
+                            onClick={() => onPaymentClick(step)}
+                            className={`flex-shrink-0 size-8 rounded-full flex items-center justify-center transition-all hover:scale-110 ${isPaid
+                                ? 'bg-green-100 text-green-600 ring-2 ring-green-200 hover:bg-green-200'
+                                : 'bg-slate-100 text-slate-400 ring-2 ring-slate-200 hover:bg-slate-200 hover:text-slate-600'
+                                }`}
+                            title={isPaid ? 'Pagamento registrado' : 'Registrar pagamento'}
+                        >
+                            <span className="material-symbols-outlined text-sm">
+                                {isPaid ? 'paid' : 'payments'}
+                            </span>
+                        </button>
                     </div>
-                </div>
-            ))}
+                );
+            })}
             <button
                 onClick={onAddStep}
                 className="ml-1 mt-2 flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-primary transition-colors uppercase tracking-wider"
@@ -111,8 +166,10 @@ const MedicationPath: React.FC<{ steps: MedicationStep[], onEditStep: (step: Med
 const InjectionHistoryTable: React.FC<{
     injections: Injection[],
     onDelete: (id: string) => void,
-    onAddHistorical: () => void
-}> = ({ injections, onDelete, onAddHistorical }) => {
+    onEdit: (injection: Injection) => void,
+    onAddHistorical: () => void,
+    onTogglePayment: (injection: Injection) => void
+}> = ({ injections, onDelete, onEdit, onAddHistorical, onTogglePayment }) => {
     const formatCurrency = (value: number) => {
         if (!value) return '-';
         return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -140,6 +197,7 @@ const InjectionHistoryTable: React.FC<{
                             <th className="px-6 py-4 font-semibold">Data</th>
                             <th className="px-6 py-4 font-semibold">Dosagem</th>
                             <th className="px-6 py-4 font-semibold">Valor</th>
+                            <th className="px-6 py-4 font-semibold">Pgto</th>
                             <th className="px-6 py-4 font-semibold">Notas</th>
                             <th className="px-6 py-4 font-semibold text-right">Status</th>
                             <th className="px-6 py-4 font-semibold text-right">Ação</th>
@@ -148,7 +206,7 @@ const InjectionHistoryTable: React.FC<{
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                         {injections.length === 0 ? (
                             <tr>
-                                <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
+                                <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
                                     Nenhuma aplicação registrada
                                 </td>
                             </tr>
@@ -170,7 +228,24 @@ const InjectionHistoryTable: React.FC<{
                                         <div className="text-sm text-slate-900 dark:text-white font-medium">{injection.dosage}</div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <div className="text-sm font-mono text-slate-600">{formatCurrency(injection.doseValue || 0)}</div>
+                                        <div className={`text-sm font-mono ${injection.isPaid ? 'text-green-600' : 'text-slate-600'}`}>
+                                            {formatCurrency(injection.doseValue || 0)}
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <button
+                                            onClick={() => onTogglePayment(injection)}
+                                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ring-1 ring-inset transition-all hover:scale-105 cursor-pointer ${injection.isPaid
+                                                ? 'bg-green-50 text-green-700 ring-green-600/20 hover:bg-green-100'
+                                                : 'bg-slate-100 text-slate-500 ring-slate-300 hover:bg-slate-200'
+                                                }`}
+                                            title={injection.isPaid ? 'Clique para marcar como não pago' : 'Clique para marcar como pago'}
+                                        >
+                                            <span className="material-symbols-outlined text-sm">
+                                                {injection.isPaid ? 'check_circle' : 'radio_button_unchecked'}
+                                            </span>
+                                            {injection.isPaid ? 'Pago' : 'Pendente'}
+                                        </button>
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="text-sm text-slate-500 truncate max-w-[150px]">{injection.notes}</div>
@@ -181,12 +256,22 @@ const InjectionHistoryTable: React.FC<{
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        <button
-                                            onClick={() => injection.id && onDelete(injection.id)}
-                                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                        >
-                                            <span className="material-symbols-outlined text-lg">delete</span>
-                                        </button>
+                                        <div className="flex items-center justify-end gap-1">
+                                            <button
+                                                onClick={() => onEdit(injection)}
+                                                className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                                title="Editar"
+                                            >
+                                                <span className="material-symbols-outlined text-lg">edit</span>
+                                            </button>
+                                            <button
+                                                onClick={() => injection.id && onDelete(injection.id)}
+                                                className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                                title="Excluir"
+                                            >
+                                                <span className="material-symbols-outlined text-lg">delete</span>
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             ))
@@ -197,6 +282,7 @@ const InjectionHistoryTable: React.FC<{
         </div>
     );
 };
+
 
 
 interface PatientProfilePageProps {
@@ -210,12 +296,19 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
     const [injections, setInjections] = useState<Injection[]>([]);
     const [loading, setLoading] = useState(true);
     const [totalPaid, setTotalPaid] = useState(0);
+    const [paidStepIds, setPaidStepIds] = useState<Set<string>>(new Set());
 
     // Modals state
     const [isEditStepModalOpen, setIsEditStepModalOpen] = useState(false);
     const [selectedStep, setSelectedStep] = useState<MedicationStep | null>(null);
     const [isEditPatientModalOpen, setIsEditPatientModalOpen] = useState(false);
     const [isHistoricalDoseModalOpen, setIsHistoricalDoseModalOpen] = useState(false);
+    const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+    const [selectedStepForPayment, setSelectedStepForPayment] = useState<MedicationStep | null>(null);
+    const [isEditDoseModalOpen, setIsEditDoseModalOpen] = useState(false);
+    const [selectedInjectionForEdit, setSelectedInjectionForEdit] = useState<Injection | null>(null);
+    const [isDosePaymentModalOpen, setIsDosePaymentModalOpen] = useState(false);
+    const [selectedInjectionForPayment, setSelectedInjectionForPayment] = useState<Injection | null>(null);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -270,7 +363,8 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                     status: inj.status === 'Applied' ? 'Aplicada' : 'Pulada',
                     doseValue: inj.dose_value || 0,
                     isHistorical: inj.is_historical || false,
-                    applicationDate: inj.application_date
+                    applicationDate: inj.application_date,
+                    isPaid: inj.is_paid || false
                 } as Injection;
             });
 
@@ -286,6 +380,15 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
             const paidSum = (paymentsData || []).reduce((sum, p) => sum + (Number(p.value) || 0), 0);
             setTotalPaid(paidSum);
 
+            // 5. Fetch step payments to know which steps are paid
+            const { data: stepPaymentsData } = await supabase
+                .from('step_payments')
+                .select('step_id')
+                .eq('patient_id', patient.id);
+
+            const paidIds = new Set<string>((stepPaymentsData || []).map(p => p.step_id));
+            setPaidStepIds(paidIds);
+
         } catch (err) {
             console.error('Error fetching profile data:', err);
         } finally {
@@ -298,9 +401,11 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
     }, [fetchData]);
 
     // Calculate financial totals
-    const { totalDosesValue, doseCount } = useMemo(() => {
+    const { totalDosesValue, doseCount, paidDoseCount, totalPaidFromDoses } = useMemo(() => {
         const total = injections.reduce((sum, inj) => sum + (inj.doseValue || 0), 0);
-        return { totalDosesValue: total, doseCount: injections.length };
+        const paidCount = injections.filter(inj => inj.isPaid).length;
+        const paidValue = injections.filter(inj => inj.isPaid).reduce((sum, inj) => sum + (inj.doseValue || 0), 0);
+        return { totalDosesValue: total, doseCount: injections.length, paidDoseCount: paidCount, totalPaidFromDoses: paidValue };
     }, [injections]);
 
     const handleEditStep = (step: MedicationStep) => {
@@ -327,12 +432,27 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
         }
     };
 
+    const handleTogglePayment = (injection: Injection) => {
+        setSelectedInjectionForPayment(injection);
+        setIsDosePaymentModalOpen(true);
+    };
+
     const handleEditPatient = () => {
         setIsEditPatientModalOpen(true);
     };
 
     const handleAddHistoricalDose = () => {
         setIsHistoricalDoseModalOpen(true);
+    };
+
+    const handleEditInjection = (injection: Injection) => {
+        setSelectedInjectionForEdit(injection);
+        setIsEditDoseModalOpen(true);
+    };
+
+    const handlePaymentClick = (step: MedicationStep) => {
+        setSelectedStepForPayment(step);
+        setIsPaymentModalOpen(true);
     };
 
     if (loading && medicationSteps.length === 0) {
@@ -398,8 +518,9 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
             {/* Financial Balance Card */}
             <FinancialBalanceCard
                 totalDosesValue={totalDosesValue}
-                totalPaid={totalPaid}
+                totalPaid={totalPaidFromDoses + totalPaid}
                 doseCount={doseCount}
+                paidDoseCount={paidDoseCount}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -411,12 +532,16 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                         steps={medicationSteps}
                         onEditStep={handleEditStep}
                         onAddStep={handleAddStep}
+                        onPaymentClick={handlePaymentClick}
+                        paidStepIds={paidStepIds}
                     />
                 </div>
                 <InjectionHistoryTable
                     injections={injections}
                     onDelete={handleDeleteInjection}
+                    onEdit={handleEditInjection}
                     onAddHistorical={handleAddHistoricalDose}
+                    onTogglePayment={handleTogglePayment}
                 />
             </div>
 
@@ -455,6 +580,45 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                     onClose={() => setIsHistoricalDoseModalOpen(false)}
                     onSuccess={fetchData}
                     patientId={patient.id}
+                    patientName={realPatient.name}
+                />
+            )}
+
+            {isPaymentModalOpen && selectedStepForPayment && (
+                <PaymentModal
+                    isOpen={isPaymentModalOpen}
+                    onClose={() => {
+                        setIsPaymentModalOpen(false);
+                        setSelectedStepForPayment(null);
+                    }}
+                    onSuccess={fetchData}
+                    step={selectedStepForPayment}
+                    patientId={patient.id}
+                    patientName={realPatient.name}
+                />
+            )}
+
+            {isEditDoseModalOpen && selectedInjectionForEdit && (
+                <EditDoseModal
+                    isOpen={isEditDoseModalOpen}
+                    onClose={() => {
+                        setIsEditDoseModalOpen(false);
+                        setSelectedInjectionForEdit(null);
+                    }}
+                    onSuccess={fetchData}
+                    injection={selectedInjectionForEdit}
+                />
+            )}
+
+            {isDosePaymentModalOpen && selectedInjectionForPayment && (
+                <DosePaymentModal
+                    isOpen={isDosePaymentModalOpen}
+                    onClose={() => {
+                        setIsDosePaymentModalOpen(false);
+                        setSelectedInjectionForPayment(null);
+                    }}
+                    onSuccess={fetchData}
+                    injection={selectedInjectionForPayment}
                     patientName={realPatient.name}
                 />
             )}
