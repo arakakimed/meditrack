@@ -54,7 +54,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
         if (data) {
             setIsPaid(true);
             setPaymentDate(data.payment_date || '');
-            setPaymentValue(data.value?.toString() || '60');
+            setPaymentValue(data.amount?.toString() || '60');
             setPixAccount(data.pix_account || '');
             setNotes(data.notes || '');
         } else {
@@ -80,7 +80,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
                     .from('step_payments')
                     .update({
                         payment_date: paymentDate,
-                        value: parseFloat(paymentValue) || 0,
+                        amount: parseFloat(paymentValue) || 0,
                         pix_account: pixAccount,
                         notes: notes
                     })
@@ -95,7 +95,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
                         step_id: step.id,
                         patient_id: patientId,
                         payment_date: paymentDate,
-                        value: parseFloat(paymentValue) || 0,
+                        amount: parseFloat(paymentValue) || 0,
                         pix_account: pixAccount,
                         notes: notes,
                         user_id: user.id

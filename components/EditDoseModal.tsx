@@ -17,6 +17,7 @@ const EditDoseModal: React.FC<EditDoseModalProps> = ({
 }) => {
     const [loading, setLoading] = useState(false);
     const [dosage, setDosage] = useState('');
+    const [applicationDate, setApplicationDate] = useState('');
     const [notes, setNotes] = useState('');
     const [status, setStatus] = useState<'Applied' | 'Skipped'>('Applied');
     const [error, setError] = useState<string | null>(null);
@@ -26,6 +27,7 @@ const EditDoseModal: React.FC<EditDoseModalProps> = ({
             // Parse dosage (remove " mg" suffix if present)
             const dosageNum = injection.dosage?.replace(/[^\d.]/g, '') || '2.5';
             setDosage(dosageNum);
+            setApplicationDate(injection.applicationDate || new Date().toISOString().split('T')[0]);
             setNotes(injection.notes || '');
             setStatus(injection.status === 'Aplicada' ? 'Applied' : 'Skipped');
             setError(null);
@@ -45,6 +47,7 @@ const EditDoseModal: React.FC<EditDoseModalProps> = ({
                 .from('injections')
                 .update({
                     dosage: `${dosage} mg`,
+                    applied_at: new Date(applicationDate).toISOString(),
                     notes: notes,
                     status: status
                 })
@@ -119,6 +122,17 @@ const EditDoseModal: React.FC<EditDoseModalProps> = ({
                     )}
 
                     <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">Data da Aplicação</label>
+                        <input
+                            required
+                            type="date"
+                            value={applicationDate}
+                            onChange={(e) => setApplicationDate(e.target.value)}
+                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none text-slate-900"
+                        />
+                    </div>
+
+                    <div>
                         <label className="block text-sm font-semibold text-slate-700 mb-1">Dosagem</label>
                         <div className="relative">
                             <input
@@ -152,8 +166,8 @@ const EditDoseModal: React.FC<EditDoseModalProps> = ({
                                 type="button"
                                 onClick={() => setStatus('Applied')}
                                 className={`flex-1 py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${status === 'Applied'
-                                        ? 'bg-green-100 text-green-700 ring-2 ring-green-300'
-                                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                    ? 'bg-green-100 text-green-700 ring-2 ring-green-300'
+                                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                                     }`}
                             >
                                 <span className="material-symbols-outlined text-base">check_circle</span>
@@ -163,8 +177,8 @@ const EditDoseModal: React.FC<EditDoseModalProps> = ({
                                 type="button"
                                 onClick={() => setStatus('Skipped')}
                                 className={`flex-1 py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${status === 'Skipped'
-                                        ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300'
-                                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                    ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300'
+                                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                                     }`}
                             >
                                 <span className="material-symbols-outlined text-base">block</span>

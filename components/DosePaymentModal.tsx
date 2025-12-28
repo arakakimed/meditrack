@@ -23,17 +23,75 @@ const DosePaymentModal: React.FC<DosePaymentModalProps> = ({
     const [pixAccount, setPixAccount] = useState('');
     const [notes, setNotes] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
 
     useEffect(() => {
-        if (isOpen) {
+        const calculateSuggestedValue = async () => {
+            if (!isOpen || !injection.dosage) return;
+
             const today = new Date().toISOString().split('T')[0];
             setPaymentDate(today);
-            setPaymentValue(injection.doseValue?.toString() || '60');
             setPixAccount('');
             setNotes('');
             setError(null);
             setLoading(false);
-        }
+
+            // If already has a value, use it
+            if (injection.doseValue && injection.doseValue > 0) {
+                setPaymentValue(injection.doseValue.toString());
+                return;
+            }
+
+            try {
+                // Extract dose value in mg (e.g., "2.5 mg" -> 2.5)
+                const doseMatch = injection.dosage.match(/(\d+\.?\d*)/);
+                if (!doseMatch) {
+                    setPaymentValue('60');
+                    return;
+                }
+                const doseMg = parseFloat(doseMatch[1]);
+
+                // Fetch medications to find package prices
+                const { data: medications } = await supabase
+                    .from('medications')
+                    .select('*')
+                    .limit(1)
+                    .single();
+
+                if (!medications) {
+                    setPaymentValue('60');
+                    return;
+                }
+
+                // Define standard packages (doses and prices)
+                const packages = [
+                    { dose: 2.5, price: 160 },
+                    { dose: 5.0, price: 230 },
+                    { dose: 7.5, price: 300 },
+                    { dose: 10.0, price: 370 },
+                    { dose: 12.5, price: 440 },
+                    { dose: 15.0, price: 510 }
+                ];
+
+                // Check if dose matches a package
+                const matchingPackage = packages.find(pkg => Math.abs(pkg.dose - doseMg) < 0.01);
+                if (matchingPackage) {
+                    setPaymentValue(matchingPackage.price.toString());
+                    return;
+                }
+
+                // If no package match, calculate based on sale_price (price per mg)
+                const pricePerMg = parseFloat(medications.sale_price) || 24; // Default R$24/mg
+                const calculatedValue = doseMg * pricePerMg;
+                setPaymentValue(calculatedValue.toFixed(2));
+
+            } catch (err) {
+                console.error('Error calculating suggested value:', err);
+                setPaymentValue('60'); // Fallback value
+            }
+        };
+
+        calculateSuggestedValue();
     }, [isOpen, injection]);
 
     if (!isOpen) return null;
@@ -67,27 +125,33 @@ const DosePaymentModal: React.FC<DosePaymentModalProps> = ({
                 updateError = error;
             }
 
-            if (updateError) {
-                // Fallback: try updating just is_paid if the combined update failed
-                // This block will only be reached if updateError is still present after the try-catch,
-                // meaning either the initial update failed and the fallback also failed,
-                // or the initial update failed and the catch block didn't properly clear updateError.
-                // Given the catch block already attempts a fallback, this might be redundant
-                // but is included as per instruction.
-                console.warn('Second fallback attempt for updating only is_paid due to previous error:', updateError);
-                const { error: fallbackError } = await supabase
-                    .from('injections')
-                    .update({ is_paid: true })
-                    .eq('id', injection.id);
+            if (updateError) throw updateError;
 
-                if (fallbackError) throw fallbackError;
+            // If confirmed payment, also create a financial record for tracking
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                // Use the ISO date format (YYYY-MM-DD) for consistency in description
+                const recordDate = injection.applicationDate || new Date().toISOString().split('T')[0];
+                const { error: finError } = await supabase
+                    .from('financial_records')
+                    .insert([{
+                        patient_id: injection.patient_id,
+                        description: `Pagamento - Dose ${injection.dosage} (${recordDate})`,
+                        amount: parseFloat(paymentValue) || 0,
+                        status: 'Pago',
+                        due_date: recordDate,
+                        user_id: user.id
+                    }]);
+                if (finError) {
+                    console.error('Error creating financial record:', finError);
+                    // Don't throw here to avoid blocking the main success flow if it's just a sync issue
+                }
             }
 
             onClose();
             requestAnimationFrame(() => {
                 onSuccess();
             });
-
         } catch (err: any) {
             console.error('Error saving payment:', err);
             setError(err.message || 'Erro ao salvar pagamento');
@@ -96,42 +160,59 @@ const DosePaymentModal: React.FC<DosePaymentModalProps> = ({
     };
 
     const handleRemovePayment = async () => {
-        if (!confirm('Deseja remover o registro de pagamento desta dose?')) return;
-
+        setShowRemoveConfirm(false);
         setLoading(true);
         setError(null);
         try {
             if (!injection.id) throw new Error('ID da dose não encontrado');
 
-            // Try updating both is_paid and dose_value
-            let updateError;
-            try {
-                const { error } = await supabase
-                    .from('injections')
-                    .update({
-                        is_paid: false,
-                        dose_value: 0
-                    })
-                    .eq('id', injection.id);
-                updateError = error;
-            } catch (err) {
-                // Fallback for missing dose_value column
-                const { error } = await supabase
-                    .from('injections')
-                    .update({ is_paid: false })
-                    .eq('id', injection.id);
-                updateError = error;
+            // Mark as unpaid in injections table - KEEP the dose_value as a debt (modo "só registrar")
+            const { error: updateError } = await supabase
+                .from('injections')
+                .update({ is_paid: false })
+                .eq('id', injection.id);
+
+            if (updateError) {
+                console.error('Error updating injection:', updateError);
+                throw updateError;
             }
 
-            if (updateError) throw updateError;
-
+            // Success: close modal and refresh data
             onClose();
             requestAnimationFrame(() => {
                 onSuccess();
             });
         } catch (err: any) {
             console.error('Error removing payment:', err);
-            setError(err.message || 'Erro ao remover pagamento');
+            setError(err.message || 'Erro ao alterar status');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRegisterValueOnly = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            if (!injection.id) throw new Error('ID da dose não encontrado');
+
+            const { error } = await supabase
+                .from('injections')
+                .update({
+                    dose_value: parseFloat(paymentValue) || 0,
+                    is_paid: false
+                })
+                .eq('id', injection.id);
+
+            if (error) throw error;
+
+            onClose();
+            requestAnimationFrame(() => {
+                onSuccess();
+            });
+        } catch (err: any) {
+            console.error('Error registering value:', err);
+            setError(err.message || 'Erro ao registrar valor');
             setLoading(false);
         }
     };
@@ -204,7 +285,7 @@ const DosePaymentModal: React.FC<DosePaymentModalProps> = ({
                             </div>
                             <button
                                 type="button"
-                                onClick={handleRemovePayment}
+                                onClick={() => setShowRemoveConfirm(true)}
                                 className="text-xs text-red-500 hover:text-red-700 font-medium"
                             >
                                 Remover
@@ -272,29 +353,140 @@ const DosePaymentModal: React.FC<DosePaymentModalProps> = ({
                         />
                     </div>
 
-                    <div className="pt-2 flex gap-3">
+                    <div className="pt-4 flex flex-col gap-4">
+                        <div className="flex gap-3">
+                            {!isPaid && (
+                                <button
+                                    type="button"
+                                    onClick={handleRegisterValueOnly}
+                                    disabled={loading}
+                                    className="flex-1 px-4 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex flex-col items-center justify-center gap-1 text-[10px] uppercase tracking-wider"
+                                >
+                                    <span className="material-symbols-outlined text-xl">account_balance_wallet</span>
+                                    SÓ REGISTRAR
+                                </button>
+                            )}
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className={`flex-[1.5] px-4 py-3 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex flex-col items-center justify-center gap-1 text-[10px] uppercase tracking-wider ${isPaid ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'}`}
+                            >
+                                {loading ? (
+                                    <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin my-1"></div>
+                                ) : (
+                                    <>
+                                        <span className="material-symbols-outlined text-xl">{isPaid ? 'save' : 'payments'}</span>
+                                        {isPaid ? 'SALVAR ALTERAÇÕES' : 'CONFIRMAR E PAGAR'}
+                                    </>
+                                )}
+                            </button>
+                        </div>
+
                         <button
                             type="button"
                             onClick={onClose}
-                            className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 transition-colors text-sm"
+                            className="w-full py-1 text-slate-400 hover:text-slate-600 text-xs font-medium transition-colors"
                         >
-                            Cancelar
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className={`flex-1 px-4 py-2.5 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-sm ${isPaid ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'}`}
-                        >
-                            {loading ? (
-                                <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                            ) : (
-                                <span className="material-symbols-outlined text-base">{isPaid ? 'save' : 'check_circle'}</span>
-                            )}
-                            {isPaid ? 'Atualizar' : 'Confirmar Pagamento'}
+                            Voltar para o histórico
                         </button>
                     </div>
                 </form>
             </div>
+
+            {/* Custom Confirmation Modal for Removing Payment */}
+            {showRemoveConfirm && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        zIndex: 10001,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '1rem',
+                        backgroundColor: 'rgba(15, 23, 42, 0.7)',
+                        backdropFilter: 'blur(4px)'
+                    }}
+                    onClick={() => setShowRemoveConfirm(false)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: 'white',
+                            borderRadius: '1rem',
+                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                            width: '100%',
+                            maxWidth: '26rem',
+                            overflow: 'hidden'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="px-6 py-5 bg-gradient-to-r from-amber-50 to-yellow-50 border-b border-amber-100">
+                            <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <span className="material-symbols-outlined text-2xl">info</span>
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold text-slate-900">Confirmar Alteração</h2>
+                                    <p className="text-sm text-slate-600">Marcar dose como pendente</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-6">
+                            <div className="mb-6">
+                                <p className="text-slate-700 leading-relaxed mb-3">
+                                    Deseja marcar esta dose como <strong>pendente</strong>?
+                                </p>
+                                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                    <p className="text-sm font-semibold text-amber-900">
+                                        {injection.dosage} - {patientName}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-6">
+                                <div className="flex items-start gap-2">
+                                    <span className="material-symbols-outlined text-blue-600 text-lg flex-shrink-0 mt-0.5">info</span>
+                                    <p className="text-sm text-blue-800">
+                                        <strong>Importante:</strong> O valor permanecerá registrado como débito. Apenas o status de pagamento será alterado.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowRemoveConfirm(false)}
+                                    className="flex-1 px-4 py-3 border-2 border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-all"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleRemovePayment}
+                                    disabled={loading}
+                                    className="flex-1 px-4 py-3 bg-amber-600 text-white font-bold rounded-xl hover:bg-amber-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    {loading ? (
+                                        <>
+                                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                            Processando...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="material-symbols-outlined text-lg">check</span>
+                                            Confirmar
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

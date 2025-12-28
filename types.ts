@@ -7,9 +7,11 @@ export interface Patient {
     age: number;
     gender: 'Male' | 'Female';
     currentWeight: number;
+    initialWeight?: number;
     weightChange: number;
     bmi: number;
     bmiCategory: string;
+    targetWeight?: number;
 }
 
 export interface UpcomingDose {
@@ -29,8 +31,10 @@ export interface Injection {
     status: 'Aplicada' | 'Pulada';
     doseValue?: number;        // Valor cobrado em R$
     isHistorical?: boolean;    // Se foi inserida retroativamente
-    applicationDate?: string;  // Data real da aplicação (YYYY-MM-DD)
-    isPaid?: boolean;          // Se o valor desta dose foi pago
+    applicationDate: string;   // Data real da aplicação (YYYY-MM-DD)
+    isPaid: boolean;           // Se o valor desta dose foi pago
+    patient_id: string;        // ID do paciente (UUID)
+    patientWeightAtInjection?: number; // Peso registrado no momento da aplicação
 }
 
 export interface MedicationStep {
@@ -42,6 +46,8 @@ export interface MedicationStep {
     current_week?: number;
     total_weeks?: number;
     is_skipped?: boolean;
+    recordedWeight?: number; // Peso histórico para exibição na jornada
+    date?: string; // Data da aplicação (exibição na jornada)
 }
 
 export interface FinancialRecord {
@@ -111,10 +117,10 @@ export const mockUpcomingDoses: UpcomingDose[] = [
 ];
 
 export const anaSilvaInjections: Injection[] = [
-    { date: '12 Fev, 2024', day: 'Quarta-feira', dosage: '5.0 mg', notes: 'Aplicação de rotina', status: 'Aplicada' },
-    { date: '05 Fev, 2024', day: 'Quarta-feira', dosage: '5.0 mg', notes: '-', status: 'Aplicada' },
-    { date: '29 Jan, 2024', day: 'Quarta-feira', dosage: '2.5 mg', notes: 'Paciente relatou náusea', status: 'Pulada' },
-    { date: '22 Jan, 2024', day: 'Quarta-feira', dosage: '2.5 mg', notes: '-', status: 'Aplicada' },
+    { date: '12 Fev, 2024', day: 'Quarta-feira', dosage: '5.0 mg', notes: 'Aplicação de rotina', status: 'Aplicada', applicationDate: '2024-02-12', isPaid: true, patient_id: '#4829' },
+    { date: '05 Fev, 2024', day: 'Quarta-feira', dosage: '5.0 mg', notes: '-', status: 'Aplicada', applicationDate: '2024-02-05', isPaid: true, patient_id: '#4829' },
+    { date: '29 Jan, 2024', day: 'Quarta-feira', dosage: '2.5 mg', notes: 'Paciente relatou náusea', status: 'Pulada', applicationDate: '2024-01-29', isPaid: false, patient_id: '#4829' },
+    { date: '22 Jan, 2024', day: 'Quarta-feira', dosage: '2.5 mg', notes: '-', status: 'Aplicada', applicationDate: '2024-01-22', isPaid: true, patient_id: '#4829' },
 ];
 
 export const anaSilvaMedicationPath: MedicationStep[] = [

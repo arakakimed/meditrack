@@ -57,10 +57,8 @@ const AddHistoricalDoseModal: React.FC<AddHistoricalDoseModalProps> = ({
                     dosage: `${dosage} mg`,
                     notes: notes || `Dose histórica (${applicationDate})`,
                     status: 'Applied',
-                    created_at: new Date(applicationDate).toISOString(),
-                    application_date: applicationDate,
+                    applied_at: new Date(applicationDate).toISOString(), // Use applied_at instead of application_date
                     dose_value: parseFloat(doseValue) || 0,
-                    is_historical: true,
                     is_paid: isPaid,
                     user_id: user.id
                 }]);
@@ -74,10 +72,9 @@ const AddHistoricalDoseModal: React.FC<AddHistoricalDoseModalProps> = ({
                     .insert([{
                         patient_id: patientId,
                         description: `Pagamento - Dose ${dosage}mg (${applicationDate})`,
-                        value: parseFloat(doseValue),
-                        type: 'income',
-                        status: 'Paid',
-                        date: applicationDate,
+                        amount: parseFloat(doseValue),
+                        status: 'Pago',
+                        due_date: applicationDate,
                         user_id: user.id
                     }]);
             }

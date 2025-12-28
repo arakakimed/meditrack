@@ -4,7 +4,6 @@ import Layout from './components/Layout';
 import DashboardPage from './components/DashboardPage';
 import PatientProfilePage from './components/PatientProfilePage';
 import FinancialsPage from './components/FinancialsPage';
-import RegisterDoseModal from './components/RegisterDoseModal';
 import SchedulePage from './components/SchedulePage';
 import MedicationsPage from './components/MedicationsPage';
 import SettingsPage from './components/SettingsPage';
@@ -12,6 +11,7 @@ import AuthPage from './components/AuthPage';
 import AddPatientModal from './components/AddPatientModal';
 import PatientsPage from './components/PatientsPage';
 import GlobalRegisterDoseModal from './components/GlobalRegisterDoseModal';
+import TagManagerModal from './components/TagManagerModal';
 import { supabase } from './lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -22,10 +22,9 @@ const App: React.FC = () => {
     const [view, setView] = useState<View>('dashboard');
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
     const [patientToEdit, setPatientToEdit] = useState<any | null>(null);
-    const [isDoseModalOpen, setIsDoseModalOpen] = useState(false);
     const [isGlobalDoseModalOpen, setIsGlobalDoseModalOpen] = useState(false);
     const [isAddPatientModalOpen, setIsAddPatientModalOpen] = useState(false);
-    const [dosePatient, setDosePatient] = useState<Patient | null>(null);
+    const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0); // For forcing re-fetch
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
@@ -91,13 +90,8 @@ const App: React.FC = () => {
     }
 
     const handleOpenDoseModal = (patient: Patient) => {
-        setDosePatient(patient);
-        setIsDoseModalOpen(true);
-    };
-
-    const handleCloseDoseModal = () => {
-        setIsDoseModalOpen(false);
-        setDosePatient(null);
+        // Now using GlobalRegisterDoseModal instead of old RegisterDoseModal
+        setIsGlobalDoseModalOpen(true);
     };
 
     const handleEditPatient = (patient: any) => {
@@ -109,18 +103,25 @@ const App: React.FC = () => {
         setRefreshKey(prev => prev + 1);
         setIsAddPatientModalOpen(false);
         setPatientToEdit(null);
+        // Dispatch global event for other components (like PatientProfilePage) to refresh
+        window.dispatchEvent(new CustomEvent('global-dose-added'));
     };
 
     const renderContent = () => {
+        const commonProps = {
+            onAddPatient: () => setIsAddPatientModalOpen(true),
+            onManageTags: () => setIsTagManagerOpen(true)
+        };
+
         switch (view) {
             case 'dashboard':
-                return <DashboardPage onViewPatient={handleViewPatient} onAdministerDose={handleOpenDoseModal} onAddPatient={() => setIsAddPatientModalOpen(true)} />;
+                return <DashboardPage onViewPatient={handleViewPatient} onAdministerDose={handleOpenDoseModal} {...commonProps} />;
             case 'patientProfile':
-                return selectedPatient ? <PatientProfilePage patient={selectedPatient} onBack={handleBackToPatients} /> : <div>Paciente não encontrado.</div>;
+                return selectedPatient ? <PatientProfilePage patient={selectedPatient} onBack={handleBackToPatients} onGoHome={() => setView('dashboard')} /> : <div>Paciente não encontrado.</div>;
             case 'financials':
                 return <FinancialsPage />;
             case 'patients':
-                return <PatientsPage key={refreshKey} onViewPatient={handleViewPatient} onEditPatient={handleEditPatient} onAddPatient={() => setIsAddPatientModalOpen(true)} />;
+                return <PatientsPage key={refreshKey} onViewPatient={handleViewPatient} onEditPatient={handleEditPatient} {...commonProps} />;
             case 'schedule':
                 return <SchedulePage onViewPatient={handleViewPatient} />;
             case 'medications':
@@ -142,11 +143,6 @@ const App: React.FC = () => {
                 onClose={() => setIsGlobalDoseModalOpen(false)}
                 onSuccess={handlePatientActionSuccess}
             />
-            <RegisterDoseModal
-                isOpen={isDoseModalOpen}
-                onClose={handleCloseDoseModal}
-                patientName={dosePatient?.name}
-            />
             <AddPatientModal
                 isOpen={isAddPatientModalOpen}
                 patientToEdit={patientToEdit}
@@ -155,6 +151,14 @@ const App: React.FC = () => {
                     setPatientToEdit(null);
                 }}
                 onSuccess={handlePatientActionSuccess}
+                onManageTags={() => setIsTagManagerOpen(true)}
+            />
+            <TagManagerModal
+                isOpen={isTagManagerOpen}
+                onClose={() => {
+                    setIsTagManagerOpen(false);
+                    setRefreshKey(prev => prev + 1);
+                }}
             />
         </ErrorBoundary>
     );

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import WeightEvolutionChart from './WeightEvolutionChart';
 import { Patient, MedicationStep, Injection } from '../types';
 import { supabase } from '../lib/supabase';
 import EditMedicationStepModal from './EditMedicationStepModal';
@@ -6,7 +7,10 @@ import AddPatientModal from './AddPatientModal';
 import AddHistoricalDoseModal from './AddHistoricalDoseModal';
 import PaymentModal from './PaymentModal';
 import EditDoseModal from './EditDoseModal';
+import GlobalRegisterDoseModal from './GlobalRegisterDoseModal';
 import DosePaymentModal from './DosePaymentModal';
+import ConfirmDeleteModal from './ConfirmDeleteModal';
+import MiniCalendar from './MiniCalendar';
 
 // Financial Balance Card Component
 const FinancialBalanceCard: React.FC<{
@@ -14,7 +18,10 @@ const FinancialBalanceCard: React.FC<{
     totalPaid: number;
     doseCount: number;
     paidDoseCount: number;
-}> = ({ totalDosesValue, totalPaid, doseCount, paidDoseCount }) => {
+    onAddPayment: () => void;
+    onSettleDebt: () => void;
+}> = ({ totalDosesValue, totalPaid, doseCount, paidDoseCount, onAddPayment, onSettleDebt }) => {
+
     // Balance = Payments - Doses Value
     // Positive = Credit (patient paid in advance)
     // Zero = Settled
@@ -55,30 +62,48 @@ const FinancialBalanceCard: React.FC<{
         <div className="bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
             <div className="flex items-center gap-2 mb-4">
                 <span className="material-symbols-outlined text-emerald-500">account_balance_wallet</span>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Saldo Financeiro</h3>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Financeiro</h3>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 mb-4">
-                <div className="text-center p-3 bg-blue-50 dark:bg-slate-800 rounded-lg">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4 mb-4">
+                <div className="text-center p-4 md:p-3 bg-blue-50 dark:bg-slate-800 rounded-lg">
                     <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Total Doses</p>
-                    <p className="text-lg font-bold text-blue-600">{formatCurrency(totalDosesValue)}</p>
-                    <p className="text-[10px] text-slate-400">{doseCount} aplicações</p>
+                    <p className="text-xl md:text-lg font-bold text-blue-600">{formatCurrency(totalDosesValue)}</p>
+                    <p className="text-xs md:text-[10px] text-slate-400">{doseCount} aplicações</p>
                 </div>
-                <div className="text-center p-3 bg-green-50 dark:bg-slate-800 rounded-lg">
+                <div className="text-center p-4 md:p-3 bg-green-50 dark:bg-slate-800 rounded-lg">
                     <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Pagamentos</p>
-                    <p className="text-lg font-bold text-green-600">{formatCurrency(totalPaid)}</p>
-                    <p className="text-[10px] text-slate-400">{paidDoseCount} doses pagas</p>
+                    <p className="text-xl md:text-lg font-bold text-green-600">{formatCurrency(totalPaid)}</p>
+                    <p className="text-xs md:text-[10px] text-slate-400">{paidDoseCount} doses pagas</p>
                 </div>
-                <div className={`text-center p-3 rounded-lg border-2 ${statusColors[balanceStatus]}`}>
+                <div className={`text-center p-4 md:p-3 rounded-lg border-2 ${statusColors[balanceStatus]}`}>
                     <p className="text-xs uppercase tracking-wider mb-1 opacity-70">Saldo</p>
                     <div className="flex items-center justify-center gap-1">
                         <span className="material-symbols-outlined text-lg">{statusIcons[balanceStatus]}</span>
-                        <p className="text-lg font-bold">
+                        <p className="text-xl md:text-lg font-bold">
                             {balanceStatus === 'debt' ? '-' : ''}{formatCurrency(balance)}
                         </p>
                     </div>
                     <p className="text-[10px] font-medium">{statusLabels[balanceStatus]}</p>
                 </div>
+            </div>
+
+            <div className="flex gap-3">
+                <button
+                    onClick={onAddPayment}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition-colors shadow-sm"
+                >
+                    <span className="material-symbols-outlined text-sm">add_card</span>
+                    <span className="text-sm">Adicionar Pagamento</span>
+                </button>
+                <button
+                    onClick={onSettleDebt}
+                    disabled={balance >= 0}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-semibold transition-colors shadow-sm"
+                >
+                    <span className="material-symbols-outlined text-sm">payments</span>
+                    <span className="text-sm">Quitar Débitos</span>
+                </button>
             </div>
         </div>
     );
@@ -90,74 +115,229 @@ const MedicationPath: React.FC<{
     onEditStep: (step: MedicationStep) => void,
     onAddStep: () => void,
     onPaymentClick: (step: MedicationStep) => void,
-    paidStepIds: Set<string>
-}> = ({ steps, onEditStep, onAddStep, onPaymentClick, paidStepIds }) => {
-    const getIcon = (status: MedicationStep['status']) => {
-        switch (status) {
-            case 'Concluído': return 'check';
-            case 'Atual': return 'pill';
-            case 'Bloqueado': return 'lock';
-            case 'Pulada': return 'error';
+    onDeleteStep: (step: MedicationStep) => void,
+    paidStepIds: Set<string>,
+    patient: Patient
+}> = ({ steps, onEditStep, onAddStep, onPaymentClick, onDeleteStep, paidStepIds, patient }) => {
+
+    // Helper to calculate weight change text
+    const getWeightInfo = (step: MedicationStep, index: number) => {
+        // Validation
+        if (!patient.initialWeight) return null;
+
+        // 1st Dose: "Peso inicial X kg"
+        if (index === 0) {
+            return {
+                text: `Peso inicial ${patient.initialWeight}kg`,
+                type: 'initial'
+            };
         }
+
+        // Use recorded weight if available (Historical Data)
+        if (step.recordedWeight) {
+            const diff = step.recordedWeight - patient.initialWeight;
+            if (diff === 0) return { text: '-', type: 'maintenance', current: `${step.recordedWeight}kg` };
+
+            return {
+                text: `${Math.abs(diff).toFixed(1)}kg`,
+                type: diff < 0 ? 'loss' : 'gain',
+                current: `${step.recordedWeight}kg`
+            };
+        }
+
+        // For steps without recorded weight (e.g. old data), but are marked as Done
+        if (step.status === 'Concluído' && !step.recordedWeight) {
+            return null; // Don't show misleading info, or show "Peso ñ reg."
+            // return { text: 'Não reg.', type: 'maintenance', current: '--' }; 
+        }
+
+        return null;
+
+        return null;
     };
 
-    const getIconClasses = (status: MedicationStep['status']) => {
-        switch (status) {
-            case 'Concluído': return 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 ring-4 ring-surface-light dark:ring-surface-dark';
-            case 'Atual': return 'bg-primary text-white ring-4 ring-blue-100 dark:ring-blue-900/30 shadow-lg shadow-blue-500/30';
-            case 'Bloqueado': return 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 ring-4 ring-surface-light dark:ring-surface-dark border border-slate-200 dark:border-slate-700';
-            case 'Pulada': return 'bg-amber-100 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400 ring-4 ring-surface-light dark:ring-surface-dark';
-        }
-    };
 
     return (
-        <div className="relative pl-2">
-            <div className="absolute top-2 left-[19px] bottom-6 w-0.5 bg-slate-200 dark:bg-slate-700"></div>
+        <div className="relative pl-24 pt-2">
+            {/* Continuous Line - Adjusted for new padding */}
+            {/* pl-24 is 96px. Circle is 36px wide (w-9). Center is 18px. line should be at 96 + 18 - 1 (width/2) = 113px? */}
+            {/* Let's try 96px + 18px = 114px left? */}
+            {/* Actually, visually tuning: left-[113px] */}
+            <div className="absolute top-4 left-[113px] bottom-0 w-0.5 bg-slate-200 dark:bg-slate-700 -z-0"></div>
+
             {steps.map((step, index) => {
                 const isPaid = step.id ? paidStepIds.has(step.id) : false;
+                const weightInfo = getWeightInfo(step, index);
+                const doseNumber = index + 1;
+
+                // Status Colors
+                const isCompleted = step.status === 'Concluído';
+                const isCurrent = step.status === 'Atual';
+
+                // Date Formatting
+                let dateDay = '';
+                let dateMonth = '';
+                let dateWeekday = '';
+
+                if (step.date) {
+                    const parts = step.date.split(' de '); // "26 de dez."
+                    if (parts.length >= 2) {
+                        dateDay = parts[0];
+                        dateMonth = parts[1].replace('.', '').toUpperCase();
+
+                        // Parse date for weekday
+                        // Needs year. Assume current year or infer?
+                        // If date is "26 de dez.", let's assume current year or nearby.
+                        // Journey steps usually are recent.
+                        const currentYear = new Date().getFullYear();
+                        const monthMap: { [key: string]: number } = {
+                            'jan': 0, 'fev': 1, 'mar': 2, 'abr': 3, 'mai': 4, 'jun': 5,
+                            'jul': 6, 'ago': 7, 'set': 8, 'out': 9, 'nov': 10, 'dez': 11
+                        };
+                        const monthIndex = monthMap[dateMonth.toLowerCase()];
+                        if (monthIndex !== undefined) {
+                            const d = new Date(currentYear, monthIndex, parseInt(dateDay));
+                            dateWeekday = d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '').toUpperCase();
+                        }
+
+                    } else if (step.date.includes('/')) {
+                        const d = step.date.split('/');
+                        const dateObj = new Date(parseInt(d[2]), parseInt(d[1]) - 1, parseInt(d[0]));
+                        dateDay = d[0];
+                        dateMonth = dateObj.toLocaleString('pt-BR', { month: 'short' }).replace('.', '').toUpperCase();
+                        dateWeekday = dateObj.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '').toUpperCase();
+                    }
+                }
 
                 return (
-                    <div key={index} className={`relative flex gap-3 mb-8 ${step.status === 'Bloqueado' ? 'opacity-60' : ''}`}>
-                        {/* Main step circle */}
-                        <div className={`relative z-10 flex items-center justify-center size-10 rounded-full ${getIconClasses(step.status)} cursor-pointer hover:scale-110 transition-transform`} onClick={() => onEditStep(step)}>
-                            <span className={`material-symbols-outlined text-lg ${step.status === 'Atual' && 'animate-pulse'}`}>{getIcon(step.status)}</span>
-                        </div>
+                    <div key={index} className={`relative z-10 flex gap-4 mb-10 group ${step.status === 'Bloqueado' ? 'opacity-50 grayscale' : ''}`}>
 
-                        {/* Step info */}
-                        <div className="flex flex-col pt-1 flex-1 min-w-0">
-                            <div className="flex justify-between items-start">
-                                <span className={`text-sm font-bold ${step.status === 'Atual' ? 'text-primary' : 'text-slate-900 dark:text-white'}`}>{step.dosage}</span>
-                            </div>
-                            <span className="text-xs text-slate-500 mb-1">{step.details}</span>
-                            {step.status === 'Atual' && step.progress && (
-                                <div className="w-32 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden mt-2">
-                                    <div className="h-full bg-primary rounded-full" style={{ width: `${step.progress}%` }}></div>
+                        {/* Date Label (Left Side) */}
+                        <div className="absolute -left-20 top-1 w-16 text-right pr-2">
+                            {step.date && isCompleted && (
+                                <div className="flex flex-col items-end">
+                                    <span className="text-sm font-bold text-slate-700 dark:text-slate-300 leading-none">{dateDay}</span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mt-0.5">{dateMonth}</span>
+                                    <span className="text-[9px] font-medium text-slate-300 dark:text-slate-600 uppercase tracking-wider leading-none mt-0.5">{dateWeekday}</span>
                                 </div>
                             )}
                         </div>
 
-                        {/* Payment button */}
-                        <button
-                            onClick={() => onPaymentClick(step)}
-                            className={`flex-shrink-0 size-8 rounded-full flex items-center justify-center transition-all hover:scale-110 ${isPaid
-                                ? 'bg-green-100 text-green-600 ring-2 ring-green-200 hover:bg-green-200'
-                                : 'bg-slate-100 text-slate-400 ring-2 ring-slate-200 hover:bg-slate-200 hover:text-slate-600'
-                                }`}
-                            title={isPaid ? 'Pagamento registrado' : 'Registrar pagamento'}
+                        {/* Status Circle */}
+                        <div
+                            className={`
+                                flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center border-[3px] shadow-sm transition-all duration-300
+                                ${isCompleted
+                                    ? 'bg-emerald-100 border-emerald-500 text-emerald-600'
+                                    : isCurrent
+                                        ? 'bg-blue-600 border-blue-200 text-white shadow-blue-500/30 scale-110'
+                                        : 'bg-slate-50 border-slate-200 text-slate-300'
+                                }
+                                group-hover:scale-110 cursor-pointer bg-white dark:bg-slate-800
+                            `}
+                            onClick={() => onEditStep(step)}
                         >
-                            <span className="material-symbols-outlined text-sm">
-                                {isPaid ? 'paid' : 'payments'}
-                            </span>
-                        </button>
+                            {isCompleted ? (
+                                <span className="material-symbols-outlined text-lg font-bold">check</span>
+                            ) : isCurrent ? (
+                                <span className="material-symbols-outlined text-lg animate-pulse">pill</span>
+                            ) : (
+                                <span className="text-xs font-bold">{doseNumber}</span>
+                            )}
+                        </div>
+
+                        {/* Content Card */}
+                        <div className="flex-1 flex flex-col pt-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                                <h4 className={`text-base font-bold flex items-center gap-2 ${isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                                    {doseNumber}ª dose <span className="text-slate-300">•</span> {step.dosage}
+                                </h4>
+
+                                <div className="flex items-center gap-2">
+
+
+                                    {/* Delete Icon */}
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); onDeleteStep(step); }}
+                                        className="w-8 h-8 rounded-full flex items-center justify-center transition-all bg-slate-50 text-slate-300 hover:bg-rose-100 hover:text-rose-500"
+                                        title="Excluir Etapa"
+                                    >
+                                        <span className="material-symbols-outlined text-lg">delete</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Weight Info Row */}
+                            <div className="flex items-center gap-2">
+                                {weightInfo ? (
+                                    <>
+                                        {weightInfo.type === 'initial' && (
+                                            <div className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md">
+                                                {weightInfo.text}
+                                            </div>
+                                        )}
+                                        {weightInfo.type === 'loss' && (
+                                            <div className="flex items-center gap-1.5 animate-in slide-in-from-left-2 duration-300">
+                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{weightInfo.current}</span>
+                                                <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded text-[10px] font-bold">
+                                                    <span className="material-symbols-outlined text-[10px]">arrow_downward</span>
+                                                    {weightInfo.text}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {weightInfo.type === 'gain' && (
+                                            <div className="flex items-center gap-1.5 animate-in slide-in-from-left-2 duration-300">
+                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{weightInfo.current}</span>
+                                                <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 rounded text-[10px] font-bold">
+                                                    <span className="material-symbols-outlined text-[10px]">arrow_upward</span>
+                                                    {weightInfo.text}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {weightInfo.type === 'maintenance' && (
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{weightInfo.current}</span>
+                                                <div className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded text-[10px] font-bold">
+                                                    -
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    /* Fallback for steps without weight info (historical steps without log) */
+                                    <span className="text-[10px] font-medium text-slate-400 italic">
+                                        {step.details}
+                                    </span>
+                                )}
+                            </div>
+
+                            {/* Current Progress Bar */}
+                            {isCurrent && step.progress && (
+                                <div className="mt-3">
+                                    <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                                            style={{ width: `${step.progress}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 );
             })}
+
+            {/* Add Step Button */}
             <button
                 onClick={onAddStep}
-                className="ml-1 mt-2 flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-primary transition-colors uppercase tracking-wider"
+                className="group flex items-center gap-3 relative z-10 ml-0.5 mt-2 transition-all hover:translate-x-1"
             >
-                <span className="material-symbols-outlined text-lg">add_circle</span>
-                Adicionar Etapa
+                <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center text-slate-400 group-hover:border-blue-400 group-hover:text-blue-500 transition-colors">
+                    <span className="material-symbols-outlined text-lg">add</span>
+                </div>
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider group-hover:text-blue-500 transition-colors">
+                    Adicionar Etapa
+                </span>
             </button>
         </div>
     );
@@ -165,119 +345,207 @@ const MedicationPath: React.FC<{
 
 const InjectionHistoryTable: React.FC<{
     injections: Injection[],
-    onDelete: (id: string) => void,
+    onDelete: (id: string, injection: Injection) => void,
     onEdit: (injection: Injection) => void,
     onAddHistorical: () => void,
-    onTogglePayment: (injection: Injection) => void
-}> = ({ injections, onDelete, onEdit, onAddHistorical, onTogglePayment }) => {
+    onTogglePayment: (injection: Injection) => void,
+    highlightedDate?: string | null
+}> = ({ injections, onDelete, onEdit, onAddHistorical, onTogglePayment, highlightedDate }) => {
+    const [expandedRow, setExpandedRow] = React.useState<number | null>(null);
+
     const formatCurrency = (value: number) => {
         if (!value) return '-';
         return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
 
+    const formatAestheticDate = (dateStr: string) => {
+        // Convert "12 Fev, 2024" to "12 Fev 2024" - Clean and aesthetic
+        const months: any = {
+            'jan': 'Jan', 'fev': 'Fev', 'mar': 'Mar', 'abr': 'Abr',
+            'mai': 'Mai', 'jun': 'Jun', 'jul': 'Jul', 'ago': 'Ago',
+            'set': 'Set', 'out': 'Out', 'nov': 'Nov', 'dez': 'Dez'
+        };
+
+        const parts = dateStr.split(' ');
+        if (parts.length >= 3) {
+            const day = parts[0];
+            const monthKey = parts[1].toLowerCase().replace(',', '');
+            const month = months[monthKey] || parts[1];
+            const year = parts[2];
+
+            return `${day} ${month} ${year}`;
+        }
+        return dateStr;
+    };
+
+    const toggleRow = (index: number) => {
+        setExpandedRow(expandedRow === index ? null : index);
+    };
+
     return (
         <div className="lg:col-span-2 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col">
-            <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
+            <div className="p-4 md:p-6 border-b border-slate-100 dark:border-slate-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">Histórico de Aplicações</h3>
-                <div className="flex gap-2">
+                <div className="flex gap-2 w-full sm:w-auto">
                     <button
                         onClick={onAddHistorical}
-                        className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 border border-amber-200 transition-colors flex items-center gap-1"
+                        className="flex-1 sm:flex-none px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 border border-amber-200 transition-colors flex items-center justify-center gap-1"
                     >
                         <span className="material-symbols-outlined text-sm">history</span>
-                        Adicionar Dose Histórica
+                        <span className="hidden sm:inline">Adicionar Dose Histórica</span>
+                        <span className="sm:hidden">Nova Dose</span>
                     </button>
-                    <button className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors">Exportar CSV</button>
+                    <button className="flex-1 sm:flex-none px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors hidden sm:flex items-center gap-1">
+                        Exportar CSV
+                    </button>
                 </div>
             </div>
-            <div className="overflow-x-auto flex-1">
-                <table className="w-full text-left border-collapse">
-                    <thead>
-                        <tr className="bg-slate-50 dark:bg-slate-800/50 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            <th className="px-6 py-4 font-semibold">Data</th>
-                            <th className="px-6 py-4 font-semibold">Dosagem</th>
-                            <th className="px-6 py-4 font-semibold">Valor</th>
-                            <th className="px-6 py-4 font-semibold">Pgto</th>
-                            <th className="px-6 py-4 font-semibold">Notas</th>
-                            <th className="px-6 py-4 font-semibold text-right">Status</th>
-                            <th className="px-6 py-4 font-semibold text-right">Ação</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {injections.length === 0 ? (
-                            <tr>
-                                <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
-                                    Nenhuma aplicação registrada
-                                </td>
-                            </tr>
-                        ) : (
-                            injections.map((injection, index) => (
-                                <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-2">
+
+            <div className="flex-1 overflow-x-auto">
+                {injections.length === 0 ? (
+                    <div className="p-12 text-center text-slate-400">
+                        Nenhuma aplicação registrada
+                    </div>
+                ) : (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {injections.map((injection, index) => (
+                            <div key={index} className="transition-colors">
+                                {/* Compact Row - Always Visible */}
+                                <div
+                                    onClick={() => toggleRow(index)}
+                                    className={`px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30 cursor-pointer transition-all ${highlightedDate === injection.applicationDate
+                                        ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500'
+                                        : ''
+                                        }`}
+                                >
+                                    <div className="grid grid-cols-[1fr,auto,auto,auto] md:grid-cols-[1.5fr,1fr,auto,auto] gap-3 items-center">
+                                        {/* Date */}
+                                        <div className="flex items-center gap-2 min-w-0">
                                             {injection.isHistorical && (
-                                                <span className="material-symbols-outlined text-amber-500 text-sm" title="Dose histórica">history</span>
+                                                <span className="material-symbols-outlined text-amber-500 text-sm flex-shrink-0" title="Dose histórica">history</span>
                                             )}
-                                            <div>
-                                                <div className="text-sm font-medium text-slate-900 dark:text-white">{injection.date}</div>
-                                                <div className="text-xs text-slate-500">{injection.day}</div>
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-medium text-slate-900 dark:text-white truncate">
+                                                    {formatAestheticDate(injection.date)}
+                                                </div>
                                             </div>
+                                            <button
+                                                className="ml-auto text-slate-400 transition-transform"
+                                                style={{ transform: expandedRow === index ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                                            >
+                                                <span className="material-symbols-outlined text-lg">expand_more</span>
+                                            </button>
                                         </div>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="text-sm text-slate-900 dark:text-white font-medium">{injection.dosage}</div>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className={`text-sm font-mono ${injection.isPaid ? 'text-green-600' : 'text-slate-600'}`}>
-                                            {formatCurrency(injection.doseValue || 0)}
+
+                                        {/* Dosagem */}
+                                        <div className="text-sm font-semibold text-slate-900 dark:text-white text-center">
+                                            {injection.dosage}
                                         </div>
-                                    </td>
-                                    <td className="px-6 py-4">
+
+                                        {/* Payment Badge */}
                                         <button
-                                            onClick={() => onTogglePayment(injection)}
-                                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ring-1 ring-inset transition-all hover:scale-105 cursor-pointer ${injection.isPaid
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onTogglePayment(injection);
+                                            }}
+                                            className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ring-1 ring-inset transition-all ${injection.isPaid
                                                 ? 'bg-green-50 text-green-700 ring-green-600/20 hover:bg-green-100'
                                                 : 'bg-slate-100 text-slate-500 ring-slate-300 hover:bg-slate-200'
                                                 }`}
-                                            title={injection.isPaid ? 'Clique para marcar como não pago' : 'Clique para marcar como pago'}
                                         >
-                                            <span className="material-symbols-outlined text-sm">
+                                            <span className="material-symbols-outlined text-xs">
                                                 {injection.isPaid ? 'check_circle' : 'radio_button_unchecked'}
                                             </span>
-                                            {injection.isPaid ? 'Pago' : 'Pendente'}
+                                            <span className="hidden sm:inline">{injection.isPaid ? 'Pago' : 'Pendente'}</span>
                                         </button>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="text-sm text-slate-500 truncate max-w-[150px]">{injection.notes}</div>
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold ring-1 ring-inset ${injection.status === 'Aplicada' ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20' : 'bg-slate-50 text-slate-700 ring-slate-600/20'}`}>
+
+                                        {/* Status Badge */}
+                                        <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-bold ring-1 ring-inset ${injection.status === 'Aplicada' ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20' : 'bg-slate-50 text-slate-700 ring-slate-600/20'}`}>
                                             {injection.status}
                                         </span>
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <div className="flex items-center justify-end gap-1">
-                                            <button
-                                                onClick={() => onEdit(injection)}
-                                                className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                                title="Editar"
-                                            >
-                                                <span className="material-symbols-outlined text-lg">edit</span>
-                                            </button>
-                                            <button
-                                                onClick={() => injection.id && onDelete(injection.id)}
-                                                className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                                title="Excluir"
-                                            >
-                                                <span className="material-symbols-outlined text-lg">delete</span>
-                                            </button>
+                                    </div>
+                                </div>
+
+                                {/* Expanded Details */}
+                                {expandedRow === index && (
+                                    <div className="px-4 py-4 bg-gradient-to-br from-slate-50/80 to-slate-100/50 dark:from-slate-800/20 dark:to-slate-900/20 border-t border-slate-200 dark:border-slate-700 animate-in slide-in-from-top-2 duration-200">
+                                        <div className="space-y-3">
+                                            {/* Dosage Card */}
+                                            <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="material-symbols-outlined text-blue-500 text-lg">medication</span>
+                                                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">Dosagem</span>
+                                                    </div>
+                                                    <span className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-lg font-bold text-blue-600 dark:text-blue-400">
+                                                        {injection.dosage}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* Financial Card */}
+                                            <div className={`p-3 rounded-lg border ${injection.isPaid ? 'bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10 border-emerald-200 dark:border-emerald-700' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`material-symbols-outlined text-lg ${injection.isPaid ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}`}>
+                                                            {injection.isPaid ? 'check_circle' : 'payments'}
+                                                        </span>
+                                                        <div>
+                                                            <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide block">Valor</span>
+                                                            {injection.isPaid && (
+                                                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Pagamento confirmado</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <span className={`text-lg font-mono font-bold ${injection.isPaid ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-900 dark:text-white'}`}>
+                                                        {formatCurrency(injection.doseValue || 0)}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* Notes Card */}
+                                            {injection.notes && (
+                                                <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                                                    <div className="flex items-start gap-2 mb-2">
+                                                        <span className="material-symbols-outlined text-amber-500 text-sm mt-0.5">sticky_note_2</span>
+                                                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">Observações</span>
+                                                    </div>
+                                                    <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed pl-6">
+                                                        {injection.notes}
+                                                    </p>
+                                                </div>
+                                            )}
+
+                                            {/* Action Buttons */}
+                                            <div className="grid grid-cols-2 gap-2 pt-1">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onEdit(injection);
+                                                    }}
+                                                    className="px-3 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-all flex items-center justify-center gap-2 font-semibold text-sm shadow-sm hover:shadow active:scale-95"
+                                                >
+                                                    <span className="material-symbols-outlined text-base">edit</span>
+                                                    Editar
+                                                </button>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        injection.id && onDelete(injection.id, injection);
+                                                    }}
+                                                    className="px-3 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all flex items-center justify-center gap-2 font-semibold text-sm shadow-sm hover:shadow active:scale-95"
+                                                >
+                                                    <span className="material-symbols-outlined text-base">delete</span>
+                                                    Excluir
+                                                </button>
+                                            </div>
                                         </div>
-                                    </td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -288,9 +556,10 @@ const InjectionHistoryTable: React.FC<{
 interface PatientProfilePageProps {
     patient: Patient;
     onBack: () => void;
+    onGoHome: () => void;
 }
 
-const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack }) => {
+const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack, onGoHome }) => {
     const [realPatient, setRealPatient] = useState<Patient>(patient);
     const [medicationSteps, setMedicationSteps] = useState<MedicationStep[]>([]);
     const [injections, setInjections] = useState<Injection[]>([]);
@@ -309,6 +578,11 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
     const [selectedInjectionForEdit, setSelectedInjectionForEdit] = useState<Injection | null>(null);
     const [isDosePaymentModalOpen, setIsDosePaymentModalOpen] = useState(false);
     const [selectedInjectionForPayment, setSelectedInjectionForPayment] = useState<Injection | null>(null);
+    const [isConfirmDeleteModalOpen, setIsConfirmDeleteModalOpen] = useState(false);
+    const [injectionToDelete, setInjectionToDelete] = useState<{ id: string; name: string } | null>(null);
+    const [stepToDelete, setStepToDelete] = useState<MedicationStep | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [highlightedDate, setHighlightedDate] = useState<string | null>(null);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -329,9 +603,11 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                     gender: patientData.gender,
                     avatarUrl: patientData.avatar_url,
                     currentWeight: patientData.current_weight,
+                    initialWeight: patientData.initial_weight || patientData.current_weight,
                     weightChange: patientData.weight_change || 0,
                     bmi: patientData.bmi,
                     bmiCategory: patientData.bmi_category,
+                    targetWeight: patientData.target_weight,
                 });
             }
 
@@ -352,8 +628,24 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                 .order('created_at', { ascending: false });
 
             const formattedInjections = (injectionsData || []).map(inj => {
-                const dateSource = inj.application_date || inj.created_at;
-                const date = new Date(dateSource);
+                const dateSource = inj.applied_at || inj.created_at;
+                let date: Date;
+
+                // Fix (Robust): Always interpret the date part (YYYY-MM-DD) as a local date at noon.
+                // This bypasses conversion issues whether the source is '2023-12-26' or '2023-12-26T00:00:00Z'.
+                // Supabase typically returns ISO strings.
+                if (typeof dateSource === 'string') {
+                    // Extract just the YYYY-MM-DD part first
+                    const datePart = dateSource.split('T')[0];
+                    const [year, month, day] = datePart.split('-').map(Number);
+
+                    // Create date at 12:00 local time to be safe from DST/Timezone shifts
+                    date = new Date(year, month - 1, day, 12, 0, 0);
+                } else {
+                    // Fallback for unlikely case it's already a Date object or other
+                    date = new Date(dateSource);
+                }
+
                 return {
                     id: inj.id,
                     date: date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }),
@@ -362,42 +654,85 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                     notes: inj.notes,
                     status: inj.status === 'Applied' ? 'Aplicada' : 'Pulada',
                     doseValue: inj.dose_value || 0,
-                    isHistorical: inj.is_historical || false,
-                    applicationDate: inj.application_date,
-                    isPaid: inj.is_paid || false
+                    applicationDate: dateSource.split('T')[0], // Use raw string YYYY-MM-DD part for consistency
+                    isPaid: inj.is_paid || false,
+                    patient_id: inj.patient_id,
+                    patientWeightAtInjection: inj.patient_weight_at_injection,
+                    medicationId: inj.medication_id
                 } as Injection;
             });
 
             setInjections(formattedInjections);
 
+            // Calculate Dynamic Current Weight from latest injection
+            const latestInjectionWithWeight = formattedInjections.find(inj => inj.patientWeightAtInjection && inj.patientWeightAtInjection > 0);
+
+            // Priority: 
+            // 1. Latest Injection Weight
+            // 2. Patient Current Weight (from DB - potentially stale, but fallback)
+            // 3. Patient Initial Weight
+            const dynamicCurrentKey = latestInjectionWithWeight
+                ? latestInjectionWithWeight.patientWeightAtInjection
+                : (patientData?.current_weight || patientData?.initial_weight);
+
+            const initial = patientData?.initial_weight || 0;
+            const current = dynamicCurrentKey || 0;
+            const change = current - initial;
+
+            if (patientData) {
+                setRealPatient({
+                    id: patientData.id,
+                    name: patientData.name,
+                    initials: patientData.initials,
+                    age: patientData.age,
+                    gender: patientData.gender,
+                    avatarUrl: patientData.avatar_url,
+                    currentWeight: current, // UPDATED: Dynamic
+                    initialWeight: initial,
+                    weightChange: parseFloat(change.toFixed(1)), // UPDATED: Dynamic calculation
+                    bmi: patientData.bmi, // NOTE: BMI in DB might be stale too, but let's stick to weight for now or recalc BMI if we have height.
+                    bmiCategory: patientData.bmi_category,
+                    targetWeight: patientData.target_weight,
+                    height: patientData.height
+                });
+            }
+
             // 4. Fetch payments for this patient
             const { data: paymentsData } = await supabase
                 .from('financial_records')
-                .select('value')
+                .select('amount')
                 .eq('patient_id', patient.id)
                 .eq('status', 'Paid');
 
-            const paidSum = (paymentsData || []).reduce((sum, p) => sum + (Number(p.value) || 0), 0);
+            const paidSum = (paymentsData || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
             setTotalPaid(paidSum);
 
             // 5. Fetch step payments to know which steps are paid
-            const { data: stepPaymentsData } = await supabase
-                .from('step_payments')
-                .select('step_id')
-                .eq('patient_id', patient.id);
-
-            const paidIds = new Set<string>((stepPaymentsData || []).map(p => p.step_id));
+            const paidIds = new Set<string>();
+            formattedInjections.forEach(inj => {
+                if (inj.isPaid && inj.id) paidIds.add(inj.id);
+            });
             setPaidStepIds(paidIds);
 
+            setLoading(false);
         } catch (err) {
             console.error('Error fetching profile data:', err);
-        } finally {
             setLoading(false);
         }
     }, [patient.id]);
 
     useEffect(() => {
         fetchData();
+
+        // Listen for global dose updates (from top bar button)
+        const handleGlobalUpdate = () => {
+            fetchData();
+        };
+
+        window.addEventListener('global-dose-added', handleGlobalUpdate);
+        return () => {
+            window.removeEventListener('global-dose-added', handleGlobalUpdate);
+        };
     }, [fetchData]);
 
     // Calculate financial totals
@@ -408,9 +743,84 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
         return { totalDosesValue: total, doseCount: injections.length, paidDoseCount: paidCount, totalPaidFromDoses: paidValue };
     }, [injections]);
 
+    // Build Journey Steps Dynamically from History + Plan
+    const journeySteps: MedicationStep[] = useMemo(() => {
+        // 1. Past Steps from Injections (Source of Truth)
+        // Injections are sorted Newest -> Oldest in state. Reverse for Journey (1st -> Last)
+        const pastSteps = [...injections].sort((a, b) => new Date(a.applicationDate).getTime() - new Date(b.applicationDate).getTime()).map((inj, index) => ({
+            id: inj.id,
+            dosage: inj.dosage,
+            status: 'Concluído' as const, // Injections are by definition applied
+            details: inj.date, // Display date as detail
+            recordedWeight: inj.patientWeightAtInjection,
+            date: inj.date,
+            // Link to injection for edit? The component logic handles editing differently...
+            // But we can pass the injection ID if needed.
+        }));
+
+        // 2. Future Steps from MedicationSteps table (The Plan)
+        // Filter out any step that is marked 'Concluído' because we replaced them with actual history.
+        // We only want 'Atual' (if not yet in history?), 'Bloqueado', 'Pulada'.
+        // Actually, 'Atual' might be the *next* dose.
+        const futureSteps = medicationSteps.filter(s => s.status !== 'Concluído');
+
+        return [...pastSteps, ...futureSteps];
+    }, [injections, medicationSteps]);
+
     const handleEditStep = (step: MedicationStep) => {
+        // If it's a past step (from injection), we should edit the INJECTION
+        if (step.status === 'Concluído' && step.id && injections.some(i => i.id === step.id)) {
+            const injectionsToEdit = injections.find(i => i.id === step.id);
+            if (injectionsToEdit) {
+                handleEditInjection(injectionsToEdit);
+                return;
+            }
+        }
+
+        // Otherwise edit as step (Plan)
         setSelectedStep(step);
         setIsEditStepModalOpen(true);
+    };
+
+    const handleDeleteStep = (step: MedicationStep) => {
+        setStepToDelete(step);
+        setIsConfirmDeleteModalOpen(true);
+    };
+
+    const confirmDeleteStep = async () => {
+        if (!stepToDelete || !stepToDelete.id) return;
+
+        try {
+            // Check if it's a real injection (history) or just a plan
+            // If it's history (Concluído), we might need to delete from 'injections' table?
+            // "cancelar a etapa" usually implies future.
+            // If the user tries to delete a "Concluído" step that comes from 'injections', the ID should be the injection ID.
+            // My 'journeySteps' logic sets ID = injection.id for past steps.
+
+            if (stepToDelete.status === 'Concluído') {
+                // It's an injection
+                const { error } = await supabase
+                    .from('injections')
+                    .delete()
+                    .eq('id', stepToDelete.id);
+                if (error) throw error;
+            } else {
+                // It's a planned step
+                const { error } = await supabase
+                    .from('medication_steps')
+                    .delete()
+                    .eq('id', stepToDelete.id);
+                if (error) throw error;
+            }
+
+            // Refresh
+            fetchData();
+            setIsConfirmDeleteModalOpen(false);
+            setStepToDelete(null);
+        } catch (error) {
+            console.error('Error deleting step:', error);
+            alert('Erro ao excluir etapa. Tente novamente.');
+        }
     };
 
     const handleAddStep = () => {
@@ -418,23 +828,54 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
         setIsEditStepModalOpen(true);
     };
 
-    const handleDeleteInjection = async (id: string) => {
-        if (!confirm('Deseja realmente excluir este registro de aplicação?')) return;
+    const handleDeleteInjection = (id: string, injection: Injection) => {
+        // Open custom confirmation modal
+        setInjectionToDelete({
+            id,
+            name: `${injection.dosage} - ${injection.date}`
+        });
+        setIsConfirmDeleteModalOpen(true);
+    };
 
+    const confirmDelete = async () => {
+        if (!injectionToDelete) return;
+
+        setIsDeleting(true);
         try {
-            const { error } = await supabase.from('injections').delete().eq('id', id);
+            const { error } = await supabase.from('injections').delete().eq('id', injectionToDelete.id);
             if (error) throw error;
+
+            setIsConfirmDeleteModalOpen(false);
+            setInjectionToDelete(null);
+
             requestAnimationFrame(() => {
                 fetchData();
             });
         } catch (err) {
             alert('Erro ao excluir aplicação');
+        } finally {
+            setIsDeleting(false);
         }
     };
 
-    const handleTogglePayment = (injection: Injection) => {
-        setSelectedInjectionForPayment(injection);
-        setIsDosePaymentModalOpen(true);
+    const handleTogglePayment = async (injection: Injection) => {
+        if (!injection.id) return;
+
+        const newStatus = !injection.isPaid;
+
+        // Optimistic update
+        setInjections(prev => prev.map(i => i.id === injection.id ? { ...i, isPaid: newStatus } : i));
+
+        try {
+            await supabase
+                .from('injections')
+                .update({ is_paid: newStatus })
+                .eq('id', injection.id);
+
+            // Also manage financial record? The modal does it... simplify for toggle
+        } catch (e) {
+            fetchData(); // Revert
+        }
     };
 
     const handleEditPatient = () => {
@@ -451,6 +892,15 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
     };
 
     const handlePaymentClick = (step: MedicationStep) => {
+        // If it's a past step, open payment for injection
+        if (step.status === 'Concluído' && step.id && injections.some(i => i.id === step.id)) {
+            const injectionsToEdit = injections.find(i => i.id === step.id);
+            if (injectionsToEdit) {
+                handleTogglePayment(injectionsToEdit);
+                return;
+            }
+        }
+        // Future steps payment logic? Usually we pay for done things.
         setSelectedStepForPayment(step);
         setIsPaymentModalOpen(true);
     };
@@ -460,98 +910,176 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
     }
 
     return (
-        <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-20">
-            <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-20 md:pb-0">
+            <div className="max-w-6xl mx-auto flex items-center gap-2 text-sm text-slate-500 pt-8 px-4">
+                <a href="#" onClick={(e) => { e.preventDefault(); onGoHome(); }} className="hover:underline opacity-60">Home</a>
+                <span className="material-symbols-outlined text-base opacity-60">chevron_right</span>
                 <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }} className="hover:underline">Pacientes</a>
                 <span className="material-symbols-outlined text-base">chevron_right</span>
-                <span className="font-medium text-slate-900 dark:text-white">Visão Geral do Perfil</span>
+                <span className="font-medium text-slate-900 dark:text-white">{realPatient.name}</span>
             </div>
 
-            <section className="bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden relative group">
-                <button
-                    onClick={handleEditPatient}
-                    className="absolute top-4 right-4 z-10 p-2 bg-white dark:bg-slate-800 rounded-full shadow-sm border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-primary transition-all opacity-0 group-hover:opacity-100"
-                >
-                    <span className="material-symbols-outlined text-lg">edit</span>
-                </button>
-
-                <div className="p-6 md:p-8 flex flex-col md:flex-row gap-8 justify-between items-start md:items-center">
-                    <div className="flex gap-6 items-center">
-                        <div className="bg-center bg-no-repeat bg-cover rounded-full h-24 w-24 ring-4 ring-slate-50 dark:ring-slate-800 shadow-inner" style={{ backgroundImage: `url("${realPatient.avatarUrl || 'https://ui-avatars.com/api/?name=' + realPatient.name}")` }}></div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">{realPatient.name}</h1>
-                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-500 dark:text-slate-400 text-sm">
-                                <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">badge</span> ID: {realPatient.id.substring(0, 8)}</span>
-                                <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">cake</span> {realPatient.age} Anos</span>
-                                <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">{realPatient.gender === 'Female' ? 'female' : 'male'}</span> {realPatient.gender === 'Female' ? 'Feminino' : 'Masculino'}</span>
+            <main className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+                <section className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-900 rounded-xl shadow-sm border border-blue-100 dark:border-slate-700 p-4 md:p-6 mb-4 md:mb-6">
+                    <div className="flex flex-col md:flex-row md:items-center gap-4 md:justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="relative w-16 h-16 md:w-20 md:h-20 flex-shrink-0">
+                                <div className="w-full h-full rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-2xl md:text-3xl font-bold shadow-lg">
+                                    {realPatient.name.charAt(0)}
+                                </div>
+                                <div className="absolute -bottom-1 -right-1 bg-green-500 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 md:border-4 border-white dark:border-slate-800 flex items-center justify-center">
+                                    <span className="material-symbols-outlined text-white text-xs md:text-sm">check</span>
+                                </div>
+                            </div>
+                            <div className="min-w-0">
+                                <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white truncate">{realPatient.name}</h2>
+                                <div className="flex flex-wrap items-center gap-2 md:gap-3 text-xs md:text-sm text-slate-600 dark:text-slate-300 mt-1">
+                                    <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">cake</span> {realPatient.age} anos</span>
+                                    <span>•</span>
+                                    <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">{realPatient.gender === 'Female' ? 'female' : 'male'}</span> {realPatient.gender === 'Female' ? 'Feminino' : 'Masculino'}</span>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    <div className="flex gap-4 w-full md:w-auto">
-                        <div className="flex-1 md:flex-none min-w-[140px] bg-blue-50 dark:bg-slate-800/50 rounded-lg p-4 border border-blue-100 dark:border-slate-700">
-                            <p className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Peso Atual</p>
-                            <div className="flex items-baseline gap-1">
-                                <span className="text-3xl font-bold text-slate-900 dark:text-white">{realPatient.currentWeight}</span>
-                                <span className="text-sm font-medium text-slate-600 dark:text-slate-400">kg</span>
-                            </div>
-                            <div className="text-xs text-green-600 mt-1 flex items-center">
-                                <span className="material-symbols-outlined text-sm mr-0.5">trending_down</span>
-                                <span>{realPatient.weightChange} kg esta semana</span>
-                            </div>
+                </section>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                    {/* Weight Card */}
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
+                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <span className="material-symbols-outlined text-4xl text-blue-500">monitor_weight</span>
                         </div>
-                        <div className="flex-1 md:flex-none min-w-[140px] bg-orange-50 dark:bg-slate-800/50 rounded-lg p-4 border border-orange-100 dark:border-slate-700">
-                            <p className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">IMC</p>
-                            <div className="flex items-baseline gap-2">
-                                <span className="text-3xl font-bold text-slate-900 dark:text-white">{realPatient.bmi}</span>
+                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Peso Atual</p>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-3xl font-bold text-slate-900 dark:text-white">{realPatient.currentWeight}</span>
+                            <span className="text-sm font-medium text-slate-500">kg</span>
+                        </div>
+                        <div className={`text-xs font-medium mt-2 flex items-center gap-1 ${realPatient.weightChange <= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                            <span className="material-symbols-outlined text-base">{realPatient.weightChange <= 0 ? 'trending_down' : 'trending_up'}</span>
+                            <span>{Math.abs(realPatient.weightChange)} kg {realPatient.weightChange <= 0 ? 'perdidos' : 'ganhos'}</span>
+                        </div>
+                    </div>
+
+                    {/* Target Weight Card */}
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
+                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <span className="material-symbols-outlined text-4xl text-purple-500">flag</span>
+                        </div>
+                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Meta</p>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-3xl font-bold text-slate-900 dark:text-white">{realPatient.targetWeight || '--'}</span>
+                            <span className="text-sm font-medium text-slate-500">kg</span>
+                        </div>
+                        {realPatient.targetWeight && realPatient.currentWeight && (
+                            <div className="text-xs font-medium mt-2 text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                                <span className="material-symbols-outlined text-base">distance</span>
+                                <span>Faltam {(realPatient.currentWeight - realPatient.targetWeight).toFixed(1)} kg</span>
                             </div>
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 mt-1">
-                                {realPatient.bmiCategory === 'Overweight' ? 'Sobrepeso' :
-                                    realPatient.bmiCategory === 'Obese' ? 'Obesidade' :
-                                        realPatient.bmiCategory === 'Normal' ? 'Normal' :
-                                            realPatient.bmiCategory}
+                        )}
+                        {!realPatient.targetWeight && (
+                            <div className="text-xs font-medium mt-2 text-slate-400">
+                                <span>Sem meta definida</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* BMI Card */}
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
+                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <span className="material-symbols-outlined text-4xl text-orange-500">health_and_safety</span>
+                        </div>
+                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">IMC</p>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-3xl font-bold text-slate-900 dark:text-white">{realPatient.bmi}</span>
+                        </div>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-2 ${realPatient.bmiCategory === 'Normal' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' :
+                            realPatient.bmiCategory === 'Overweight' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' :
+                                'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                            }`}>
+                            {realPatient.bmiCategory === 'Overweight' ? 'Sobrepeso' :
+                                realPatient.bmiCategory === 'Obese' ? 'Obesidade' :
+                                    realPatient.bmiCategory === 'Normal' ? 'Normal' :
+                                        realPatient.bmiCategory}
+                        </span>
+                    </div>
+
+                    {/* Progress Card (Initial vs Current) */}
+                    <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl p-4 shadow-lg text-white relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-4 opacity-20 group-hover:opacity-30 transition-opacity">
+                            <span className="material-symbols-outlined text-4xl text-white">analytics</span>
+                        </div>
+                        <p className="text-xs font-medium text-blue-100 uppercase tracking-wider mb-2">Progresso Total</p>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-3xl font-bold text-white">
+                                {realPatient.initialWeight && realPatient.currentWeight
+                                    ? (realPatient.initialWeight - realPatient.currentWeight).toFixed(1)
+                                    : '0.0'}
                             </span>
+                            <span className="text-sm font-medium text-blue-100">kg elim.</span>
+                        </div>
+                        <div className="mt-3 w-full bg-black/20 rounded-full h-1.5 overflow-hidden">
+                            <div
+                                className="bg-white/90 h-full rounded-full transition-all duration-1000"
+                                style={{
+                                    width: `${realPatient.targetWeight && realPatient.initialWeight
+                                        ? Math.min(100, Math.max(0, ((realPatient.initialWeight - realPatient.currentWeight) / (realPatient.initialWeight - realPatient.targetWeight)) * 100))
+                                        : 0}%`
+                                }}
+                            ></div>
+                        </div>
+                        <div className="flex justify-between mt-1">
+                            <span className="text-[10px] text-blue-200">Início: {realPatient.initialWeight}kg</span>
+                            <span className="text-[10px] text-blue-200">Meta: {realPatient.targetWeight || '?'}kg</span>
                         </div>
                     </div>
                 </div>
-            </section>
 
-            {/* Financial Balance Card */}
-            <FinancialBalanceCard
-                totalDosesValue={totalDosesValue}
-                totalPaid={totalPaidFromDoses + totalPaid}
-                doseCount={doseCount}
-                paidDoseCount={paidDoseCount}
-            />
+                {/* Weight Evolution Chart */}
+                <div className="mb-8 animate-in slide-in-from-bottom-2 duration-500 delay-100">
+                    <WeightEvolutionChart patient={realPatient} injections={injections} />
+                </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-1 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                    <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">Jornada do Paciente</h3>
+                {/* Financial Balance Card */}
+                <FinancialBalanceCard
+                    totalDosesValue={totalDosesValue}
+                    totalPaid={totalPaidFromDoses + totalPaid}
+                    doseCount={doseCount}
+                    paidDoseCount={paidDoseCount}
+                    onAddPayment={() => alert('Em breve: Funcionalidade para adicionar pagamentos avulsos ou pacotes.')}
+                    onSettleDebt={() => alert('Em breve: Geração de PIX para quitação total dos débitos.')}
+                />
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* Left Column - Journey */}
+                    <div className="lg:col-span-1 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Jornada do Paciente</h3>
+                        </div>
+                        <MedicationPath
+                            steps={journeySteps}
+                            onEditStep={handleEditStep}
+                            onAddStep={() => setIsEditStepModalOpen(true)}
+                            onPaymentClick={handlePaymentClick}
+                            onDeleteStep={handleDeleteStep}
+                            paidStepIds={paidStepIds}
+                            patient={realPatient}
+                        />
                     </div>
-                    <MedicationPath
-                        steps={medicationSteps}
-                        onEditStep={handleEditStep}
-                        onAddStep={handleAddStep}
-                        onPaymentClick={handlePaymentClick}
-                        paidStepIds={paidStepIds}
+
+                    {/* Right Column - History & Financial */}
+                    <InjectionHistoryTable
+                        injections={injections}
+                        onDelete={(id, inj) => {
+                            setInjectionToDelete({ id, name: `${inj.dosage} - ${inj.date}` });
+                            setIsConfirmDeleteModalOpen(true);
+                        }}
+                        onEdit={handleEditInjection}
+                        onAddHistorical={() => setIsHistoricalDoseModalOpen(true)}
+                        onTogglePayment={handleTogglePayment}
+                        highlightedDate={highlightedDate}
                     />
                 </div>
-                <InjectionHistoryTable
-                    injections={injections}
-                    onDelete={handleDeleteInjection}
-                    onEdit={handleEditInjection}
-                    onAddHistorical={handleAddHistoricalDose}
-                    onTogglePayment={handleTogglePayment}
-                />
-            </div>
-
-            <button
-                onClick={handleEditPatient}
-                className="fixed bottom-8 right-8 z-30 group flex items-center justify-center gap-2 bg-primary hover:bg-blue-700 text-white shadow-xl shadow-blue-900/20 rounded-full pl-5 pr-6 py-4 transition-all duration-300 hover:scale-105 active:scale-95"
-            >
-                <span className="material-symbols-outlined text-2xl group-hover:rotate-90 transition-transform duration-300">add</span>
-                <span className="font-bold text-base tracking-wide">Registrar Peso</span>
-            </button>
+            </main>
 
             {/* Modals */}
             {isEditStepModalOpen && (
@@ -575,12 +1103,17 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
             )}
 
             {isHistoricalDoseModalOpen && (
-                <AddHistoricalDoseModal
+                <GlobalRegisterDoseModal
                     isOpen={isHistoricalDoseModalOpen}
                     onClose={() => setIsHistoricalDoseModalOpen(false)}
-                    onSuccess={fetchData}
-                    patientId={patient.id}
-                    patientName={realPatient.name}
+                    onSuccess={(newInjection) => {
+                        if (newInjection) {
+                            setInjections(prev => [newInjection, ...prev]);
+                        }
+                        fetchData();
+                        setIsHistoricalDoseModalOpen(false);
+                    }}
+                    initialPatient={realPatient}
                 />
             )}
 
@@ -599,14 +1132,15 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
             )}
 
             {isEditDoseModalOpen && selectedInjectionForEdit && (
-                <EditDoseModal
+                <GlobalRegisterDoseModal
                     isOpen={isEditDoseModalOpen}
                     onClose={() => {
                         setIsEditDoseModalOpen(false);
                         setSelectedInjectionForEdit(null);
                     }}
                     onSuccess={fetchData}
-                    injection={selectedInjectionForEdit}
+                    editMode={true}
+                    editingInjection={selectedInjectionForEdit}
                 />
             )}
 
@@ -622,6 +1156,19 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                     patientName={realPatient.name}
                 />
             )}
+
+            {/* Confirm Delete Modal */}
+            <ConfirmDeleteModal
+                isOpen={isConfirmDeleteModalOpen}
+                onClose={() => {
+                    setIsConfirmDeleteModalOpen(false);
+                    setInjectionToDelete(null);
+                    setStepToDelete(null);
+                }}
+                onConfirm={stepToDelete ? confirmDeleteStep : confirmDelete}
+                itemName={stepToDelete ? `Dose ${stepToDelete.dosage}` : (injectionToDelete?.name || '')}
+                loading={isDeleting}
+            />
         </div>
     );
 };

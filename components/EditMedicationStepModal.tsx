@@ -33,6 +33,7 @@ const EditMedicationStepModal: React.FC<EditMedicationStepModalProps> = ({ isOpe
     const [isSkipped, setIsSkipped] = useState(false);
     const [lastRegisteredWeek, setLastRegisteredWeek] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const [date, setDate] = useState('');
 
     useEffect(() => {
         const fetchLastWeek = async () => {
@@ -58,6 +59,21 @@ const EditMedicationStepModal: React.FC<EditMedicationStepModalProps> = ({ isOpe
                 setCurrentWeek(stepToEdit.current_week || 1);
                 setTotalWeeks(stepToEdit.total_weeks || 16);
                 setIsSkipped(stepToEdit.is_skipped || false);
+                // Parse date if exists. Step date format might be "26 de dez." or "DD/MM/YYYY" or ISO?
+                // Ideally we should store ISO in DB. Assuming 'date' in stepToEdit is display string, 
+                // we might need to change implementation plan to store ISO separately or parse it back.
+                // For now, let's assume we are starting fresh with ISO dates in DB for new feature.
+                // Or if it's already localized, we can't easily put it in input type="date".
+                // Let's assume we will start saving YYYY-MM-DD from now on.
+                // If the existing date is "26 de dez.", we ignore it for the date picker (or try to parse).
+                // Let's check if stepToEdit has a 'scheduled_date' or raw 'date' if it was YYYY-MM-DD.
+
+                // If stepToEdit.date is "YYYY-MM-DD", use it.
+                if (stepToEdit.date && stepToEdit.date.includes('-') && !stepToEdit.date.includes('de')) {
+                    setDate(stepToEdit.date);
+                } else {
+                    setDate('');
+                }
             } else {
                 setDosage('');
                 setDetails('');
@@ -65,7 +81,30 @@ const EditMedicationStepModal: React.FC<EditMedicationStepModalProps> = ({ isOpe
                 setProgress(0);
                 setTotalWeeks(16);
                 setIsSkipped(false);
+                setDate('');
             }
+            // Fetch Patient Weights for Progress Calculation
+            const fetchWeights = async () => {
+                const { data: p } = await supabase
+                    .from('patients')
+                    .select('initial_weight, current_weight, target_weight')
+                    .eq('id', patientId)
+                    .single();
+
+                if (p && p.initial_weight && p.target_weight && p.current_weight) {
+                    const totalToLose = p.initial_weight - p.target_weight;
+                    const lostSoFar = p.initial_weight - p.current_weight;
+                    if (totalToLose > 0) {
+                        const pct = Math.round((lostSoFar / totalToLose) * 100);
+                        // Cap at 100? User Image shows 119%, so DO NOT CAP.
+                        setProgress(pct);
+                    } else {
+                        setProgress(100);
+                    }
+                }
+            };
+            fetchWeights();
+
         }
     }, [stepToEdit, isOpen, patientId]);
 
@@ -100,7 +139,8 @@ const EditMedicationStepModal: React.FC<EditMedicationStepModalProps> = ({ isOpe
                 total_weeks: totalWeeks,
                 is_skipped: isSkipped,
                 user_id: user.id,
-                order_index: stepToEdit ? stepToEdit.order_index : nextOrderIndex
+                order_index: stepToEdit ? stepToEdit.order_index : nextOrderIndex,
+                date: date || null // Save ISO string directly.
             };
 
             if (stepToEdit?.id) {
@@ -166,30 +206,17 @@ const EditMedicationStepModal: React.FC<EditMedicationStepModalProps> = ({ isOpe
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Semana Atual</label>
-                            <input
-                                type="number"
-                                required
-                                min="1"
-                                value={currentWeek}
-                                onChange={(e) => setCurrentWeek(parseInt(e.target.value))}
-                                className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-primary/20 outline-none text-slate-900 dark:text-white"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Total Semanas</label>
-                            <input
-                                type="number"
-                                required
-                                min="1"
-                                value={totalWeeks}
-                                onChange={(e) => setTotalWeeks(parseInt(e.target.value))}
-                                className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-primary/20 outline-none text-slate-900 dark:text-white"
-                            />
-                        </div>
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Data Prevista</label>
+                        <input
+                            type="date"
+                            value={date}
+                            onChange={(e) => setDate(e.target.value)}
+                            className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-primary/20 outline-none text-slate-900 dark:text-white"
+                        />
                     </div>
+
+
 
                     <div className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-2xl">
                         <input
@@ -221,9 +248,9 @@ const EditMedicationStepModal: React.FC<EditMedicationStepModalProps> = ({ isOpe
                             </select>
                         </div>
                         <div className="flex flex-col justify-end">
-                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Progresso Automático</div>
+                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Progresso Automático (Peso)</div>
                             <div className="text-sm font-bold text-primary">
-                                {Math.round((currentWeek / totalWeeks) * 100)}%
+                                {progress}%
                             </div>
                         </div>
                     </div>

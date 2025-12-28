@@ -129,6 +129,7 @@ const AddMedicationModal: React.FC<AddMedicationModalProps> = ({ isOpen, onClose
                 concentration_mg_ml: conc,
                 total_mg_per_vial: totalMg,
                 volume_ml_per_vial: isFinite(volume) ? volume : 0,
+                // Additional fields for price calculations
                 user_id: user.id
             };
 
@@ -346,6 +347,112 @@ const AddMedicationModal: React.FC<AddMedicationModalProps> = ({ isOpen, onClose
                                 </div>
                             </div>
                         </div>
+
+                        {/* Price Calculations Visual Display - Mobile First */}
+                        {(() => {
+                            const totalMg = parseFloat(totalMgPerVial) || 1;
+                            const costVial = parseFloat(costPrice) || 0;
+                            const saleMg = parseFloat(salePrice) || 0;
+                            const conc = parseFloat(concentrationMgMl) || 1;
+                            const volML = totalMg / conc;
+                            const totalUI = volML * 100;
+
+                            const costPerMg = costVial / totalMg;
+                            const costPerUI = costVial / totalUI;
+                            const salePerUI = (saleMg * totalMg) / totalUI;
+                            const profitPerMg = saleMg - costPerMg;
+                            const profitPerUI = salePerUI - costPerUI;
+
+                            return (
+                                <div className="space-y-3">
+                                    {/* Cost Breakdown - Amber */}
+                                    <div className="p-4 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border-2 border-amber-200">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <span className="material-symbols-outlined text-amber-600 text-lg">shopping_cart</span>
+                                            <h4 className="text-sm font-bold text-amber-900">Custo Calculado</h4>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="bg-white/80 rounded-lg p-3 border border-amber-100">
+                                                <p className="text-[10px] text-amber-600 font-semibold uppercase mb-1">Custo por mg</p>
+                                                <p className="text-2xl md:text-xl font-bold text-amber-700">
+                                                    R$ {costPerMg.toFixed(2)}
+                                                </p>
+                                                <p className="text-[9px] text-slate-500 mt-0.5">
+                                                    {totalMg.toFixed(0)} mg/frasco
+                                                </p>
+                                            </div>
+                                            <div className="bg-white/80 rounded-lg p-3 border border-amber-100">
+                                                <p className="text-[10px] text-amber-600 font-semibold uppercase mb-1">Custo por UI</p>
+                                                <p className="text-2xl md:text-xl font-bold text-amber-700">
+                                                    R$ {costPerUI.toFixed(2)}
+                                                </p>
+                                                <p className="text-[9px] text-slate-500 mt-0.5">
+                                                    {totalUI.toFixed(0)} UI/frasco
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Sale Breakdown - Green */}
+                                    <div className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border-2 border-emerald-200">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <span className="material-symbols-outlined text-emerald-600 text-lg">sell</span>
+                                            <h4 className="text-sm font-bold text-emerald-900">Venda Calculada</h4>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="bg-white/80 rounded-lg p-3 border border-emerald-100">
+                                                <p className="text-[10px] text-emerald-600 font-semibold uppercase mb-1">Venda por mg</p>
+                                                <p className="text-2xl md:text-xl font-bold text-emerald-700">
+                                                    R$ {saleMg.toFixed(2)}
+                                                </p>
+                                                <p className="text-[9px] text-slate-500 mt-0.5">
+                                                    da tabela
+                                                </p>
+                                            </div>
+                                            <div className="bg-white/80 rounded-lg p-3 border border-emerald-100">
+                                                <p className="text-[10px] text-emerald-600 font-semibold uppercase mb-1">Venda por UI</p>
+                                                <p className="text-2xl md:text-xl font-bold text-emerald-700">
+                                                    R$ {salePerUI.toFixed(2)}
+                                                </p>
+                                                <p className="text-[9px] text-slate-500 mt-0.5">
+                                                    {totalUI.toFixed(0)} UI/frasco
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Profit - Blue */}
+                                    {(costVial > 0 && saleMg > 0) && (
+                                        <div className="p-4 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl border-2 border-blue-200">
+                                            <div className="flex items-center gap-2 mb-3">
+                                                <span className="material-symbols-outlined text-blue-600 text-lg">trending_up</span>
+                                                <h4 className="text-sm font-bold text-blue-900">Lucro Estimado</h4>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="bg-white/80 rounded-lg p-3 border border-blue-100">
+                                                    <p className="text-[10px] text-blue-600 font-semibold uppercase mb-1">Lucro por mg</p>
+                                                    <p className={`text-2xl md:text-xl font-bold ${profitPerMg >= 0 ? 'text-blue-700' : 'text-red-600'}`}>
+                                                        R$ {profitPerMg.toFixed(2)}
+                                                    </p>
+                                                    <p className="text-[9px] text-slate-500 mt-0.5">
+                                                        Margem: {costPerMg > 0 ? ((profitPerMg / costPerMg) * 100).toFixed(1) : '0'}%
+                                                    </p>
+                                                </div>
+                                                <div className="bg-white/80 rounded-lg p-3 border border-blue-100">
+                                                    <p className="text-[10px] text-blue-600 font-semibold uppercase mb-1">Lucro por UI</p>
+                                                    <p className={`text-2xl md:text-xl font-bold ${profitPerUI >= 0 ? 'text-blue-700' : 'text-red-600'}`}>
+                                                        R$ {profitPerUI.toFixed(2)}
+                                                    </p>
+                                                    <p className="text-[9px] text-slate-500 mt-0.5">
+                                                        por unidade
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
 
                         {/* Dose Packages Section */}
                         <div className="border border-emerald-200 rounded-xl overflow-hidden">
