@@ -1,17 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { MedicationStep } from '../types';
 
-interface MedicationStep {
-    id?: string;
-    dosage: string;
-    details: string;
-    status: 'Concluído' | 'Atual' | 'Bloqueado' | 'Pulada';
-    progress?: number;
-    order_index: number;
-    current_week?: number;
-    total_weeks?: number;
-    is_skipped?: boolean;
-}
+
 
 interface EditMedicationStepModalProps {
     isOpen: boolean;
@@ -139,7 +130,7 @@ const EditMedicationStepModal: React.FC<EditMedicationStepModalProps> = ({ isOpe
                 total_weeks: totalWeeks,
                 is_skipped: isSkipped,
                 user_id: user.id,
-                order_index: stepToEdit ? stepToEdit.order_index : nextOrderIndex,
+                order_index: stepToEdit ? (stepToEdit.order_index ?? nextOrderIndex) : nextOrderIndex,
                 date: date || null // Save ISO string directly.
             };
 

@@ -12,6 +12,11 @@ export interface Patient {
     bmi: number;
     bmiCategory: string;
     targetWeight?: number;
+    tags?: string[]; // Array of Tag IDs
+    initial_weight?: number;
+    current_weight?: number;
+    height?: number;
+    target_weight?: number;
 }
 
 export interface UpcomingDose {
@@ -37,12 +42,21 @@ export interface Injection {
     patientWeightAtInjection?: number; // Peso registrado no momento da aplicação
 }
 
+export interface WeightMeasurement {
+    id: string;
+    patient_id: string;
+    weight: number;
+    date: string; // YYYY-MM-DD
+    created_at?: string;
+}
+
 export interface MedicationStep {
     id?: string;
     dosage: string;
     status: 'Concluído' | 'Atual' | 'Bloqueado' | 'Pulada';
     details: string;
     progress?: number;
+    order_index?: number;
     current_week?: number;
     total_weeks?: number;
     is_skipped?: boolean;

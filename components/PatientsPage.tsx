@@ -189,7 +189,7 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ onViewPatient, onEditPatien
 
                 <div className="flex flex-col md:flex-row items-center gap-3">
                     {/* Tag Filter */}
-                    <div className="relative min-w-[160px] hidden md:block">
+                    <div className="relative w-full md:w-auto md:min-w-[160px]">
                         <select
                             value={selectedTagFilter}
                             onChange={(e) => setSelectedTagFilter(e.target.value)}
@@ -201,11 +201,11 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ onViewPatient, onEditPatien
                             ))}
                         </select>
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                            <span className="material-symbols-outlined text-lg">expand_more</span>
+                            <span className="material-symbols-outlined text-lg">filter_list</span>
                         </span>
                     </div>
 
-                    <div className="relative flex-1 min-w-[240px]">
+                    <div className="relative w-full md:flex-1 md:min-w-[240px]">
                         <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
                             <span className="material-symbols-outlined text-[20px]">search</span>
                         </span>

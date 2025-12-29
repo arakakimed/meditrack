@@ -1,21 +1,25 @@
 import React, { useMemo } from 'react';
+// NEW IMPORT (types.ts)
 import { Injection, Patient } from '../types';
+
+export interface WeightDataPoint {
+    id?: string; // NEW: ID for deletion
+    date: Date;
+    weight: number;
+    source: 'injection' | 'manual' | 'initial';
+    label?: string;
+}
 
 interface WeightEvolutionChartProps {
     patient: Patient;
-    injections: Injection[];
+    weightHistory: WeightDataPoint[]; // Unified history
+    onDeleteWeight?: (point: WeightDataPoint) => void;
 }
 
-interface ChartPoint {
-    date: Date;
-    weight: number;
-    label: string;
-    type: 'initial' | 'record' | 'current';
-}
-
-const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, injections }) => {
-    // Responsive Logic - MOVED TO TOP to avoid hook error
+const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, weightHistory, onDeleteWeight }) => {
+    // ... responsive hook ...
     const [isMobile, setIsMobile] = React.useState(false);
+    const [hoveredIndex, setHoveredIndex] = React.useState<number | null>(null);
 
     React.useEffect(() => {
         const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -25,48 +29,18 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, in
     }, []);
 
     // 1. Prepare Data
-    const dataPoints: ChartPoint[] = useMemo(() => {
-        const points: ChartPoint[] = [];
+    const dataPoints = useMemo(() => {
+        // Sort safely by date
+        const sorted = [...weightHistory].sort((a, b) => a.date.getTime() - b.date.getTime());
 
-        // Initial Weight
-        // ... (data prep logic) ...
+        // Add Initial Weight if not present or earlier than all records
+        // (Though typically the caller should handle "Initial" in the unified array logic, 
+        //  but adding here for robustness if array matches logic)
+        // Let's assume the passed `weightHistory` is ALREADY formatted including initial/manual/injections.
+        // Actually, let's just use it directly, ensuring date objs.
 
-        // Filter injections with valid weight
-        const weightRecords = injections
-            .filter(inj => inj.patientWeightAtInjection)
-            .map(inj => ({
-                date: new Date(inj.applicationDate), // Use simple date part
-                weight: inj.patientWeightAtInjection!,
-                label: inj.date, // Formatted date
-                type: 'record' as const
-            }))
-            .sort((a, b) => a.date.getTime() - b.date.getTime());
-
-        // Add Initial Weight at the beginning
-        if (patient.initialWeight) {
-            let startDate = new Date();
-            if (weightRecords.length > 0) {
-                startDate = new Date(weightRecords[0].date);
-                startDate.setDate(startDate.getDate() - 7); // Assume started a week before first recorded dose if valid
-            } else {
-                startDate.setDate(startDate.getDate() - 30); // Default 1 month ago if no data
-            }
-
-            points.push({
-                date: startDate,
-                weight: patient.initialWeight,
-                label: 'Início',
-                type: 'initial'
-            });
-        }
-
-        // Add records
-        points.push(...weightRecords);
-
-        // Dedup by date (keep latest)
-        // Sort by date
-        return points.sort((a, b) => a.date.getTime() - b.date.getTime());
-    }, [patient, injections]);
+        return sorted;
+    }, [weightHistory]);
 
     // 2. Dimensions & Scales
     const width = isMobile ? 350 : 800;
@@ -167,8 +141,11 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, in
     const fontSizeLabel = isMobile ? 12 : 12;
     const circleRadius = isMobile ? 4 : 5;
 
+
+
     return (
         <div className="w-full bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 p-4 md:p-6 overflow-hidden">
+            {/* ... header ... */}
             <div className="flex justify-between items-center mb-4 md:mb-6">
                 <div>
                     <h3 className="text-base md:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -276,45 +253,66 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, in
 
                     {/* Data Points */}
                     {dataPoints.map((point, i) => (
-                        <g key={i} className="group cursor-pointer">
+                        <g
+                            key={i}
+                            className="cursor-pointer"
+                            onMouseEnter={() => setHoveredIndex(i)}
+                            onMouseLeave={() => setHoveredIndex(null)}
+                            onClick={() => setHoveredIndex(i === hoveredIndex ? null : i)}
+                        >
+                            {/* Hit Area (Invisible larger circle for easier hovering) */}
                             <circle
                                 cx={getX(point.date)}
                                 cy={getY(point.weight)}
-                                r={circleRadius}
-                                className="fill-white stroke-blue-500 stroke-[2] md:stroke-[3] transition-all group-hover:r-7 group-hover:stroke-blue-600"
+                                r={20}
+                                fill="transparent"
                             />
 
-                            {/* Improved Tooltip logic for Mobile */}
-                            {/* Always show label for first, last, and if mobile, maybe alternating? Or just touch interaction */}
-                            <g className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                <rect
-                                    x={getX(point.date) - (isMobile ? 30 : 40)}
-                                    y={getY(point.weight) - (isMobile ? 35 : 45)}
-                                    width={isMobile ? 60 : 80}
-                                    height={isMobile ? 25 : 35}
-                                    rx="6"
-                                    className="fill-slate-800 dark:fill-white"
-                                />
-                                <text
-                                    x={getX(point.date)}
-                                    y={getY(point.weight) - (isMobile ? 20 : 30)}
-                                    textAnchor="middle"
-                                    style={{ fontSize: fontSizeLabel }}
-                                    className="fill-white dark:fill-slate-900 font-bold"
-                                >
-                                    {point.weight} kg
-                                </text>
-                                {!isMobile && (
-                                    <text
-                                        x={getX(point.date)}
-                                        y={getY(point.weight) - 18}
-                                        textAnchor="middle"
-                                        className="text-[9px] fill-slate-300 dark:fill-slate-500"
+                            {/* Visible Point */}
+                            <circle
+                                cx={getX(point.date)}
+                                cy={getY(point.weight)}
+                                r={hoveredIndex === i ? circleRadius + 2 : circleRadius}
+                                className={`fill-white stroke-blue-500 stroke-[2] md:stroke-[3] transition-all ${hoveredIndex === i ? 'stroke-blue-600' : ''}`}
+                            />
+
+                            {/* Tooltip - Only visible if hovered/clicked */}
+                            {hoveredIndex === i && (
+                                <g className="animate-in fade-in zoom-in-95 duration-200" style={{ pointerEvents: 'none' }}>
+                                    {/* Tooltip Box via foreignObject for better HTML/Button support */}
+                                    <foreignObject
+                                        x={getX(point.date) - (isMobile ? 50 : 60)}
+                                        y={getY(point.weight) - (isMobile ? 55 : 65)}
+                                        width={isMobile ? 100 : 120}
+                                        height={50}
+                                        style={{ overflow: 'visible', pointerEvents: 'auto' }} // Allow interaction
                                     >
-                                        {point.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-                                    </text>
-                                )}
-                            </g>
+                                        <div className="relative flex flex-col items-center justify-center bg-slate-800 text-white rounded-lg shadow-xl px-3 py-1.5 text-xs">
+                                            {/* Close Button - Only for manual weights */}
+                                            {point.source === 'manual' && onDeleteWeight && (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onDeleteWeight(point);
+                                                    }}
+                                                    className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 shadow-sm z-50 cursor-pointer transition-transform hover:scale-110"
+                                                    title="Excluir medição"
+                                                >
+                                                    <span className="material-symbols-outlined text-[10px] font-bold">close</span>
+                                                </button>
+                                            )}
+
+                                            <span className="font-bold text-sm">{point.weight} kg</span>
+                                            <span className="text-[10px] text-slate-300 mt-0.5">
+                                                {point.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                                            </span>
+
+                                            {/* Little Chevron/Arrow */}
+                                            <div className="absolute top-full left-1/2 -translate-x-1/2 border-x-4 border-x-transparent border-t-[6px] border-t-slate-800"></div>
+                                        </div>
+                                    </foreignObject>
+                                </g>
+                            )}
                         </g>
                     ))}
 

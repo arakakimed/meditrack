@@ -12,6 +12,7 @@ import AddPatientModal from './components/AddPatientModal';
 import PatientsPage from './components/PatientsPage';
 import GlobalRegisterDoseModal from './components/GlobalRegisterDoseModal';
 import TagManagerModal from './components/TagManagerModal';
+import FirstAccessPage from './components/FirstAccessPage';
 import { supabase } from './lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -28,21 +29,150 @@ const App: React.FC = () => {
     const [refreshKey, setRefreshKey] = useState(0); // For forcing re-fetch
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
+    const [userRole, setUserRole] = useState<string | null>(null);
+    const [showFirstAccess, setShowFirstAccess] = useState(false);
 
     useEffect(() => {
         // Get initial session
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
-            setLoading(false);
+            if (session) {
+                checkUserRole(session.user.id);
+            } else {
+                setLoading(false);
+            }
         });
 
         // Listen for changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
+            if (session) {
+                checkUserRole(session.user.id);
+            } else {
+                setUserRole(null);
+                setShowFirstAccess(false);
+            }
         });
 
         return () => subscription.unsubscribe();
     }, []);
+
+    const checkUserRole = async (userId: string) => {
+        console.log('Checking user role/status for:', userId);
+        try {
+            let role = null;
+
+            // 0. SUPER ADMIN HARDCODE (God Mode)
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user?.email === 'arakaki.med@gmail.com') {
+                console.log('⚡ SUPER ADMIN DETECTED ⚡');
+                role = 'Admin';
+                setShowFirstAccess(false);
+                setUserRole('Admin');
+
+                // Ensure profile exists/is correct
+                // Fire and forget upsert to fix DB if broken
+                supabase.from('profiles').upsert({
+                    id: userId,
+                    email: user.email,
+                    role: 'Admin',
+                    name: 'SuperAdmin',
+                    status: 'Active',
+                    initials: 'SA'
+                }).then(({ error }) => {
+                    if (error) console.error('Auto-fixing SuperAdmin profile failed:', error);
+                    else console.log('SuperAdmin profile auto-fixed.');
+                });
+
+                return;
+            }
+
+            // 1. Always check Profile first (Source of Truth for Roles)
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('role')
+                .eq('id', userId)
+                .single();
+
+            if (profile) {
+                console.log('Profile Role found:', profile.role);
+                role = profile.role;
+            } else {
+                // Backup: Check metadata if profile is missing
+                console.warn('Profile not found in profiles table. Checking metadata...');
+                const metaRole = user?.user_metadata?.role;
+                if (metaRole === 'Admin' || metaRole === 'Staff') {
+                    console.log('Role found in metadata:', metaRole);
+                    role = metaRole;
+                }
+            }
+
+            // 2. Decide based on Role
+            if (role === 'Admin' || role === 'Staff') {
+                // Admins/Staff NEVER see First Access, regardless of patients table
+                setShowFirstAccess(false);
+                setUserRole(role);
+                // Admin stays on dashboard or whatever default view is
+                return;
+            }
+
+            // 3. If standard user or patient, check/enforce Patient Record
+            role = 'Patient'; // Defaulting to Patient if not admin
+
+            const { data: patientRecord } = await supabase
+                .from('patients')
+                .select('id')
+                .eq('user_id', userId)
+                .single();
+
+            if (patientRecord) {
+                // Patient EXISTS -> Go to Profile
+                setShowFirstAccess(false);
+                setUserRole('Patient');
+
+                // Fetch full data
+                const { data: patient } = await supabase
+                    .from('patients')
+                    .select('*')
+                    .eq('user_id', userId)
+                    .single();
+
+                if (patient) {
+                    const mappedPatient: Patient = {
+                        id: patient.id,
+                        name: patient.name,
+                        initials: patient.initials,
+                        age: patient.age,
+                        gender: patient.gender,
+                        avatarUrl: patient.avatar_url,
+                        currentWeight: patient.current_weight,
+                        weightChange: 0,
+                        bmi: patient.bmi,
+                        bmiCategory: patient.bmi_category,
+                        tags: patient.tags || [],
+                        initialWeight: patient.initial_weight || patient.current_weight,
+                        targetWeight: patient.target_weight,
+                        height: patient.height
+                    };
+                    setSelectedPatient(mappedPatient);
+                    setView('patientProfile');
+                }
+
+            } else {
+                // Patient MISSING -> Show First Access
+                console.log('User is not Admin and has no patient record -> First Access');
+                setShowFirstAccess(true);
+                setUserRole('Patient'); // Tentative role
+            }
+
+        } catch (error) {
+            console.error('Error checking user role:', error);
+            // On error, safest to default to standard view or error state, but let's leave as is to avoid lockout
+        } finally {
+            setLoading(false);
+        }
+    };
+
 
     if (loading) {
         return (
@@ -53,14 +183,46 @@ const App: React.FC = () => {
     }
 
     if (!session) {
-        return <AuthPage onAuthSuccess={() => { }} />;
+        return <AuthPage onAuthSuccess={() => { /* State handled by onAuthStateChange */ }} />;
     }
 
-    const handleViewPatient = (patientOrId: any) => {
+    // New User / First Access Flow
+    if (showFirstAccess) {
+        return <FirstAccessPage onSuccess={() => checkUserRole(session.user.id)} />;
+    }
+
+    const handleViewPatient = async (patientOrId: any) => {
         if (typeof patientOrId === 'string') {
-            const patient = mockPatients.find(p => p.id === patientOrId);
+            // Fetch patient from Supabase by ID
+            const { data: patient, error } = await supabase
+                .from('patients')
+                .select('*')
+                .eq('id', patientOrId)
+                .single();
+
+            if (error) {
+                console.error('Error fetching patient:', error);
+                return;
+            }
+
             if (patient) {
-                setSelectedPatient(patient);
+                const mappedPatient: Patient = {
+                    id: patient.id,
+                    name: patient.name,
+                    initials: patient.initials,
+                    age: patient.age,
+                    gender: patient.gender,
+                    avatarUrl: patient.avatar_url,
+                    currentWeight: patient.current_weight,
+                    weightChange: patient.weight_change || 0,
+                    bmi: patient.bmi,
+                    bmiCategory: patient.bmi_category,
+                    tags: patient.tags || [],
+                    initialWeight: patient.initial_weight || patient.current_weight,
+                    targetWeight: patient.target_weight,
+                    height: patient.height
+                };
+                setSelectedPatient(mappedPatient);
                 setView('patientProfile');
             }
             return;
@@ -79,12 +241,17 @@ const App: React.FC = () => {
             weightChange: patient.weight_change || 0,
             bmi: patient.bmi,
             bmiCategory: patient.bmi_category,
+            tags: patient.tags || [],
+            initialWeight: patient.initial_weight || patient.current_weight,
+            targetWeight: patient.target_weight,
+            height: patient.height
         };
         setSelectedPatient(mappedPatient);
         setView('patientProfile');
     };
 
     const handleBackToPatients = () => {
+        if (userRole === 'Patient') return; // Prevent patients from going back
         setView('patients');
         setSelectedPatient(null);
     }
@@ -105,6 +272,11 @@ const App: React.FC = () => {
         setPatientToEdit(null);
         // Dispatch global event for other components (like PatientProfilePage) to refresh
         window.dispatchEvent(new CustomEvent('global-dose-added'));
+
+        // If patient, re-fetch self to update UI
+        if (userRole === 'Patient' && session) {
+            checkUserRole(session.user.id);
+        }
     };
 
     const renderContent = () => {
@@ -115,9 +287,15 @@ const App: React.FC = () => {
 
         switch (view) {
             case 'dashboard':
-                return <DashboardPage onViewPatient={handleViewPatient} onAdministerDose={handleOpenDoseModal} {...commonProps} />;
+                return <DashboardPage
+                    onViewPatient={handleViewPatient}
+                    onAdministerDose={handleOpenDoseModal}
+                    onAddPatient={() => setIsAddPatientModalOpen(true)}
+                    setView={setView}
+                    {...commonProps}
+                />;
             case 'patientProfile':
-                return selectedPatient ? <PatientProfilePage patient={selectedPatient} onBack={handleBackToPatients} onGoHome={() => setView('dashboard')} /> : <div>Paciente não encontrado.</div>;
+                return selectedPatient ? <PatientProfilePage patient={selectedPatient} onBack={handleBackToPatients} onGoHome={() => userRole !== 'Patient' && setView('dashboard')} isPatientView={userRole === 'Patient'} /> : <div>Paciente não encontrado.</div>;
             case 'financials':
                 return <FinancialsPage />;
             case 'patients':
@@ -129,37 +307,55 @@ const App: React.FC = () => {
             case 'settings':
                 return <SettingsPage />;
             default:
-                return <DashboardPage onViewPatient={handleViewPatient} onAdministerDose={handleOpenDoseModal} />;
+                return <DashboardPage
+                    onViewPatient={handleViewPatient}
+                    onAdministerDose={handleOpenDoseModal}
+                    onAddPatient={() => setIsAddPatientModalOpen(true)}
+                    setView={setView}
+                />;
         }
     };
 
     return (
         <ErrorBoundary>
-            <Layout view={view} setView={setView} onOpenGlobalDose={() => setIsGlobalDoseModalOpen(true)}>
+            <Layout
+                view={view}
+                setView={setView}
+                onOpenGlobalDose={() => setIsGlobalDoseModalOpen(true)}
+                onViewPatient={userRole === 'Patient' ? undefined : handleViewPatient}
+                userRole={userRole} // Pass user role
+            >
                 {renderContent()}
             </Layout>
-            <GlobalRegisterDoseModal
-                isOpen={isGlobalDoseModalOpen}
-                onClose={() => setIsGlobalDoseModalOpen(false)}
-                onSuccess={handlePatientActionSuccess}
-            />
-            <AddPatientModal
-                isOpen={isAddPatientModalOpen}
-                patientToEdit={patientToEdit}
-                onClose={() => {
-                    setIsAddPatientModalOpen(false);
-                    setPatientToEdit(null);
-                }}
-                onSuccess={handlePatientActionSuccess}
-                onManageTags={() => setIsTagManagerOpen(true)}
-            />
-            <TagManagerModal
-                isOpen={isTagManagerOpen}
-                onClose={() => {
-                    setIsTagManagerOpen(false);
-                    setRefreshKey(prev => prev + 1);
-                }}
-            />
+
+            {/* Modal Logic */}
+            {/* Hide global add dose/patient for patients generally */}
+            {userRole !== 'Patient' && (
+                <>
+                    <GlobalRegisterDoseModal
+                        isOpen={isGlobalDoseModalOpen}
+                        onClose={() => setIsGlobalDoseModalOpen(false)}
+                        onSuccess={handlePatientActionSuccess}
+                    />
+                    <AddPatientModal
+                        isOpen={isAddPatientModalOpen}
+                        patientToEdit={patientToEdit}
+                        onClose={() => {
+                            setIsAddPatientModalOpen(false);
+                            setPatientToEdit(null);
+                        }}
+                        onSuccess={handlePatientActionSuccess}
+                        onManageTags={() => setIsTagManagerOpen(true)}
+                    />
+                    <TagManagerModal
+                        isOpen={isTagManagerOpen}
+                        onClose={() => {
+                            setIsTagManagerOpen(false);
+                            setRefreshKey(prev => prev + 1);
+                        }}
+                    />
+                </>
+            )}
         </ErrorBoundary>
     );
 };

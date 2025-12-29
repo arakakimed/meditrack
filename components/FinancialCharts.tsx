@@ -154,9 +154,9 @@ export const FinancialDonutChart: React.FC<DonutChartProps> = ({
     let accumulatedPercent = 0;
 
     return (
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-8 h-full">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-8 h-full w-full">
             {/* Chart */}
-            <div className="relative" style={{ width: height, height: height }}>
+            <div className="relative aspect-square w-full max-w-[250px]" style={{ maxHeight: height }}>
                 {/* Rotated SVG so start point is top */}
                 <svg viewBox={`0 0 ${size} ${size}`} className="w-full h-full transform -rotate-90">
                     {/* Background Track */}
@@ -173,8 +173,8 @@ export const FinancialDonutChart: React.FC<DonutChartProps> = ({
                         const safeDashLength = percent === 1 ? circumference : Math.max(0, dashLength);
 
                         const dashSpace = circumference - safeDashLength;
-                        const offset = -(accumulatedPercent * circumference);
 
+                        // Fix initial rotation offset
                         const startAngle = accumulatedPercent * 360;
                         accumulatedPercent += percent;
 
@@ -200,16 +200,16 @@ export const FinancialDonutChart: React.FC<DonutChartProps> = ({
                 </svg>
 
                 {/* Center Label */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">{totalLabel}</p>
-                    <p className="text-3xl font-black text-slate-800 dark:text-white mt-1">
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-4">
+                    <p className="text-xs text-slate-400 uppercase font-bold tracking-wider text-center line-clamp-1">{totalLabel}</p>
+                    <p className="text-xl md:text-3xl font-black text-slate-800 dark:text-white mt-1 text-center scale-90 md:scale-100 transition-transform">
                         {valueFormatter(total === 1 ? 0 : total)}
                     </p>
                 </div>
             </div>
 
             {/* Legend */}
-            <div className="flex flex-col gap-3 min-w-[120px]">
+            <div className="flex flex-row flex-wrap sm:flex-col justify-center gap-3 md:min-w-[120px]">
                 {data.map((d, i) => (
                     <div key={i} className="flex items-center gap-3">
                         <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }}></span>
@@ -217,7 +217,7 @@ export const FinancialDonutChart: React.FC<DonutChartProps> = ({
                             <p className="text-xs text-slate-500 font-medium">{d.label}</p>
                             <p className="text-sm font-bold text-slate-800 dark:text-white">
                                 {valueFormatter(d.value)}
-                                <span className="text-xs text-slate-400 font-normal ml-1">({((d.value / total) * 100).toFixed(0)}%)</span>
+                                <span className="text-xs text-slate-400 font-normal ml-1 hidden lg:inline">({((d.value / total) * 100).toFixed(0)}%)</span>
                             </p>
                         </div>
                     </div>

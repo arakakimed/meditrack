@@ -11,7 +11,10 @@ import GlobalRegisterDoseModal from './GlobalRegisterDoseModal';
 import DosePaymentModal from './DosePaymentModal';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 import MiniCalendar from './MiniCalendar';
+
 import { PatientFinancials } from './PatientFinancials';
+import AddWeightModal from './AddWeightModal';
+import { WeightDataPoint } from './WeightEvolutionChart';
 
 
 
@@ -285,19 +288,41 @@ const InjectionHistoryTable: React.FC<{
 
     return (
         <div className="lg:col-span-2 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col">
-            <div className="p-4 md:p-6 border-b border-slate-100 dark:border-slate-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div className="p-4 md:p-6 border-b border-slate-100 dark:border-slate-700 flex flex-wrap justify-between items-center gap-3">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">Histórico de Aplicações</h3>
-                <div className="flex gap-2 w-full sm:w-auto">
+                <div className="flex flex-wrap gap-2">
                     <button
                         onClick={onAddHistorical}
-                        className="flex-1 sm:flex-none px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 border border-amber-200 transition-colors flex items-center justify-center gap-1"
+                        className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800 transition-colors flex items-center gap-1.5"
                     >
                         <span className="material-symbols-outlined text-sm">history</span>
-                        <span className="hidden sm:inline">Adicionar Dose Histórica</span>
-                        <span className="sm:hidden">Nova Dose</span>
+                        <span>Adicionar Dose Histórica</span>
                     </button>
-                    <button className="flex-1 sm:flex-none px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors hidden sm:flex items-center gap-1">
-                        Exportar CSV
+                    <button
+                        onClick={() => {
+                            // Generate CSV from injections
+                            const headers = ['Data', 'Dosagem', 'Status'];
+                            const rows = injections.map(inj => [
+                                inj.date,
+                                `${inj.dosage} mg`,
+                                inj.status
+                            ]);
+
+                            const csvContent = [
+                                headers.join(','),
+                                ...rows.map(row => row.join(','))
+                            ].join('\n');
+
+                            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                            const link = document.createElement('a');
+                            link.href = URL.createObjectURL(blob);
+                            link.download = `historico_aplicacoes_${new Date().toISOString().split('T')[0]}.csv`;
+                            link.click();
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5"
+                    >
+                        <span className="material-symbols-outlined text-sm">download</span>
+                        <span>Exportar CSV</span>
                     </button>
                 </div>
             </div>
@@ -468,6 +493,11 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
     const [totalPaid, setTotalPaid] = useState(0);
     const [paidStepIds, setPaidStepIds] = useState<Set<string>>(new Set());
 
+    // Manual Weights State
+    const [manualWeights, setManualWeights] = useState<any[]>([]);
+    const [isAddWeightModalOpen, setIsAddWeightModalOpen] = useState(false);
+    const [weightToDelete, setWeightToDelete] = useState<{ id: string, weight: number, date: Date } | null>(null);
+
     // Modals state
     const [isEditStepModalOpen, setIsEditStepModalOpen] = useState(false);
     const [selectedStep, setSelectedStep] = useState<MedicationStep | null>(null);
@@ -488,14 +518,16 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            // 1. Fetch Patient Details (to ensure they are fresh)
+            // 1. Fetch Patient
             const { data: patientData } = await supabase
                 .from('patients')
                 .select('*')
                 .eq('id', patient.id)
                 .single();
 
+            // ... (keep existing patient data setting) ...
             if (patientData) {
+                // ... (reconstruct realPatient state) ...
                 setRealPatient({
                     id: patientData.id,
                     name: patientData.name,
@@ -509,41 +541,35 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                     bmi: patientData.bmi,
                     bmiCategory: patientData.bmi_category,
                     targetWeight: patientData.target_weight,
+                    height: patientData.height
                 });
             }
 
-            // 2. Fetch Medication Steps
+            // 2. Fetch Medication Steps (keep existing)
             const { data: stepsData } = await supabase
                 .from('medication_steps')
                 .select('*')
                 .eq('patient_id', patient.id)
                 .order('order_index', { ascending: true });
-
             setMedicationSteps(stepsData || []);
 
-            // 3. Fetch Injections
+            // 3. Fetch Injections (keep existing)
             const { data: injectionsData } = await supabase
                 .from('injections')
                 .select('*')
                 .eq('patient_id', patient.id)
                 .order('created_at', { ascending: false });
 
+            // ... (keep existing formatting logic for injections) ...
             const formattedInjections = (injectionsData || []).map(inj => {
                 const dateSource = inj.applied_at || inj.created_at;
-                let date: Date;
-
-                // Fix (Robust): Always interpret the date part (YYYY-MM-DD) as a local date at noon.
-                // This bypasses conversion issues whether the source is '2023-12-26' or '2023-12-26T00:00:00Z'.
-                // Supabase typically returns ISO strings.
-                if (typeof dateSource === 'string') {
-                    // Extract just the YYYY-MM-DD part first
-                    const datePart = dateSource.split('T')[0];
-                    const [year, month, day] = datePart.split('-').map(Number);
-
-                    // Create date at 12:00 local time to be safe from DST/Timezone shifts
-                    date = new Date(year, month - 1, day, 12, 0, 0);
+                const datePart = typeof dateSource === 'string' ? dateSource.split('T')[0] : '';
+                // Simple Date Parsing Logic
+                let date;
+                if (datePart) {
+                    const [y, m, d] = datePart.split('-').map(Number);
+                    date = new Date(y, m - 1, d, 12, 0, 0);
                 } else {
-                    // Fallback for unlikely case it's already a Date object or other
                     date = new Date(dateSource);
                 }
 
@@ -555,50 +581,26 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                     notes: inj.notes,
                     status: inj.status === 'Applied' ? 'Aplicada' : 'Pulada',
                     doseValue: inj.dose_value || 0,
-                    applicationDate: dateSource.split('T')[0], // Use raw string YYYY-MM-DD part for consistency
+                    applicationDate: datePart, // YYYY-MM-DD
                     isPaid: inj.is_paid || false,
                     patient_id: inj.patient_id,
                     patientWeightAtInjection: inj.patient_weight_at_injection,
                     medicationId: inj.medication_id
                 } as Injection;
             });
-
             setInjections(formattedInjections);
 
-            // Calculate Dynamic Current Weight from latest injection
-            const latestInjectionWithWeight = formattedInjections.find(inj => inj.patientWeightAtInjection && inj.patientWeightAtInjection > 0);
+            // 4. NEW: Fetch Manual Weights
+            const { data: weightData } = await supabase
+                .from('weight_measurements')
+                .select('*')
+                .eq('patient_id', patient.id)
+                .order('date', { ascending: true });
 
-            // Priority: 
-            // 1. Latest Injection Weight
-            // 2. Patient Initial Weight (If no history, current = initial)
-            // IGNORING patientData.current_weight from DB to prevent stale data
-            const dynamicCurrentKey = latestInjectionWithWeight
-                ? latestInjectionWithWeight.patientWeightAtInjection
-                : patientData?.initial_weight;
+            setManualWeights(weightData || []);
 
-            const initial = patientData?.initial_weight || 0;
-            const current = dynamicCurrentKey || 0;
-            const change = current - initial;
 
-            if (patientData) {
-                setRealPatient({
-                    id: patientData.id,
-                    name: patientData.name,
-                    initials: patientData.initials,
-                    age: patientData.age,
-                    gender: patientData.gender,
-                    avatarUrl: patientData.avatar_url,
-                    currentWeight: current, // UPDATED: Dynamic
-                    initialWeight: initial,
-                    weightChange: parseFloat(change.toFixed(1)), // UPDATED: Dynamic calculation
-                    bmi: patientData.bmi, // NOTE: BMI in DB might be stale too, but let's stick to weight for now or recalc BMI if we have height.
-                    bmiCategory: patientData.bmi_category,
-                    targetWeight: patientData.target_weight,
-                    height: patientData.height
-                });
-            }
-
-            // 4. Fetch payments for this patient
+            // ... (keep existing payments fetch) ...
             const { data: paymentsData } = await supabase
                 .from('financial_records')
                 .select('amount')
@@ -608,7 +610,6 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
             const paidSum = (paymentsData || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
             setTotalPaid(paidSum);
 
-            // 5. Fetch step payments to know which steps are paid
             const paidIds = new Set<string>();
             formattedInjections.forEach(inj => {
                 if (inj.isPaid && inj.id) paidIds.add(inj.id);
@@ -643,6 +644,55 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
         const paidValue = injections.filter(inj => inj.isPaid).reduce((sum, inj) => sum + (inj.doseValue || 0), 0);
         return { totalDosesValue: total, doseCount: injections.length, paidDoseCount: paidCount, totalPaidFromDoses: paidValue };
     }, [injections]);
+
+    // Prepare Unified Weight History for Chart
+    const weightHistory: WeightDataPoint[] = useMemo(() => {
+        const history: WeightDataPoint[] = [];
+
+        // 1. Initial Weight
+        if (realPatient.initialWeight) {
+            // Estimate date if not available (e.g. 1 month prior to first injection or today)
+            // But let's try to be smart. If there are no injections, use created_at of patient (not available here yet).
+            // For now, let's skip "Artificial" initial points here and let the chart handle it or add if needed.
+            // Actually, best to add it here if we want consistency.
+            // Let's rely on the Chart's internal logic for "Initial" if it detects it, 
+            // OR we map it here. The previous chart logic had safe fallbacks.
+            // Let's pass explicit points we KNOW.
+
+            // Note: The previous chart logic extracted 'initial' from patient prop.
+            // We should keep passing 'patient' prop to chart, so it can handle "Initial" line.
+            // But for the POINTS array:
+        }
+
+        // 1. Injection Weights
+        injections.forEach(inj => {
+            if (inj.patientWeightAtInjection) {
+                history.push({
+                    date: new Date(inj.applicationDate), // YYYY-MM-DD string to Date
+                    weight: inj.patientWeightAtInjection,
+                    source: 'injection',
+                    label: inj.date
+                });
+            }
+        });
+
+        // 2. Manual Weights
+        manualWeights.forEach(mw => {
+            // mw.date is YYYY-MM-DD string
+            const [y, m, d] = mw.date.split('-').map(Number);
+            const dateObj = new Date(y, m - 1, d, 12, 0, 0);
+
+            history.push({
+                id: mw.id,
+                date: dateObj,
+                weight: mw.weight,
+                source: 'manual',
+                label: dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+            });
+        });
+
+        return history;
+    }, [injections, manualWeights, realPatient.initialWeight]);
 
     // Build Journey Steps Dynamically from History + Plan
     const journeySteps: MedicationStep[] = useMemo(() => {
@@ -844,15 +894,15 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                     </div>
                 </section>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
                     {/* Weight Card */}
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl p-3 md:p-4 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
                         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <span className="material-symbols-outlined text-4xl text-blue-500">monitor_weight</span>
                         </div>
-                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Peso Atual</p>
+                        <p className="text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 md:mb-2">Peso Atual</p>
                         <div className="flex items-baseline gap-1">
-                            <span className="text-3xl font-bold text-slate-900 dark:text-white">{realPatient.currentWeight}</span>
+                            <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{realPatient.currentWeight}</span>
                             <span className="text-sm font-medium text-slate-500">kg</span>
                         </div>
                         <div className={`text-xs font-medium mt-2 flex items-center gap-1 ${realPatient.weightChange <= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
@@ -866,9 +916,9 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <span className="material-symbols-outlined text-4xl text-purple-500">flag</span>
                         </div>
-                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Meta</p>
+                        <p className="text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 md:mb-2">Meta</p>
                         <div className="flex items-baseline gap-1">
-                            <span className="text-3xl font-bold text-slate-900 dark:text-white">{realPatient.targetWeight || '--'}</span>
+                            <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{realPatient.targetWeight || '--'}</span>
                             <span className="text-sm font-medium text-slate-500">kg</span>
                         </div>
                         {realPatient.targetWeight && realPatient.currentWeight && (
@@ -889,9 +939,9 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <span className="material-symbols-outlined text-4xl text-orange-500">health_and_safety</span>
                         </div>
-                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">IMC</p>
+                        <p className="text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 md:mb-2">IMC</p>
                         <div className="flex items-baseline gap-1">
-                            <span className="text-3xl font-bold text-slate-900 dark:text-white">{realPatient.bmi}</span>
+                            <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{realPatient.bmi}</span>
                         </div>
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-2 ${realPatient.bmiCategory === 'Normal' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' :
                             realPatient.bmiCategory === 'Overweight' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' :
@@ -909,9 +959,9 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                         <div className="absolute top-0 right-0 p-4 opacity-20 group-hover:opacity-30 transition-opacity">
                             <span className="material-symbols-outlined text-4xl text-white">analytics</span>
                         </div>
-                        <p className="text-xs font-medium text-blue-100 uppercase tracking-wider mb-2">Progresso Total</p>
+                        <p className="text-[10px] md:text-xs font-medium text-blue-100 uppercase tracking-wider mb-1 md:mb-2">Progresso Total</p>
                         <div className="flex items-baseline gap-1">
-                            <span className="text-3xl font-bold text-white">
+                            <span className="text-2xl md:text-3xl font-bold text-white">
                                 {realPatient.initialWeight && realPatient.currentWeight
                                     ? (realPatient.initialWeight - realPatient.currentWeight).toFixed(1)
                                     : '0.0'}
@@ -936,9 +986,56 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                 </div>
 
                 {/* Weight Evolution Chart */}
-                <div className="mb-8 animate-in slide-in-from-bottom-2 duration-500 delay-100">
-                    <WeightEvolutionChart patient={realPatient} injections={injections} />
+                {/* Weight Evolution Chart */}
+                <div className="mb-8 animate-in slide-in-from-bottom-2 duration-500 delay-100 group relative">
+                    <WeightEvolutionChart
+                        patient={realPatient}
+                        weightHistory={weightHistory}
+                        onDeleteWeight={(point) => {
+                            if (point.id) {
+                                setWeightToDelete({ id: point.id, weight: point.weight, date: point.date });
+                            }
+                        }}
+                    />
+                    {/* Floating "Add Weight" Button for Chart Area */}
+                    <div className="absolute top-4 right-4 md:right-6">
+                        <button
+                            onClick={() => setIsAddWeightModalOpen(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 shadow-md border border-blue-500 rounded-xl text-xs md:text-sm font-bold text-white hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 hover:shadow-lg"
+                        >
+                            <span className="material-symbols-outlined text-lg">add_circle</span>
+                            Registrar Peso
+                        </button>
+                    </div>
                 </div>
+
+                {/* Weight Deletion Confirmation Modal */}
+                {weightToDelete && (
+                    <ConfirmDeleteModal
+                        isOpen={!!weightToDelete}
+                        onClose={() => setWeightToDelete(null)}
+                        onConfirm={async () => {
+                            if (!weightToDelete) return;
+                            try {
+                                const { error } = await supabase
+                                    .from('weight_measurements')
+                                    .delete()
+                                    .eq('id', weightToDelete.id);
+
+                                if (error) throw error;
+
+                                setWeightToDelete(null);
+                                fetchData(); // Refresh data
+                            } catch (e) {
+                                alert('Erro ao excluir peso.');
+                                console.error(e);
+                            }
+                        }}
+                        title="Excluir Peso"
+                        message="Tem certeza que deseja excluir este registro? Esta ação não pode ser desfeita."
+                        itemName={`${weightToDelete.weight}kg em ${weightToDelete.date.toLocaleDateString('pt-BR')}`}
+                    />
+                )}
 
                 {/* Financial Section - New PatientFinancials */}
                 <PatientFinancials
@@ -949,19 +1046,21 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {/* Left Column - Journey */}
-                    <div className="lg:col-span-1 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                        <div className="flex justify-between items-center mb-6">
+                    <div className="lg:col-span-1 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 overflow-hidden flex flex-col">
+                        <div className="flex justify-between items-center mb-6 flex-shrink-0">
                             <h3 className="text-lg font-bold text-slate-900 dark:text-white">Jornada do Paciente</h3>
                         </div>
-                        <MedicationPath
-                            steps={journeySteps}
-                            onEditStep={handleEditStep}
-                            onAddStep={() => setIsEditStepModalOpen(true)}
-                            onPaymentClick={handlePaymentClick}
-                            onDeleteStep={handleDeleteStep}
-                            paidStepIds={paidStepIds}
-                            patient={realPatient}
-                        />
+                        <div className="overflow-y-auto pr-2 -mr-2 flex-1">
+                            <MedicationPath
+                                steps={journeySteps}
+                                onEditStep={handleEditStep}
+                                onAddStep={() => setIsEditStepModalOpen(true)}
+                                onPaymentClick={handlePaymentClick}
+                                onDeleteStep={handleDeleteStep}
+                                paidStepIds={paidStepIds}
+                                patient={realPatient}
+                            />
+                        </div>
                     </div>
 
                     {/* Right Column - History & Financial */}
@@ -1066,6 +1165,16 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                 onConfirm={stepToDelete ? confirmDeleteStep : confirmDelete}
                 itemName={stepToDelete ? `Dose ${stepToDelete.dosage}` : (injectionToDelete?.name || '')}
                 loading={isDeleting}
+            />
+            {/* Manual Weight Modal */}
+            <AddWeightModal
+                isOpen={isAddWeightModalOpen}
+                onClose={() => setIsAddWeightModalOpen(false)}
+                onSuccess={() => {
+                    fetchData(); // Refresh measurements
+                }}
+                patientId={patient.id}
+                currentWeight={realPatient.currentWeight}
             />
         </div>
     );

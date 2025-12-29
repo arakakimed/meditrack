@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { FinancialLineChart, FinancialDonutChart } from './FinancialCharts';
+import ConfirmDeleteModal from './ConfirmDeleteModal';
 
 const formatCurrency = (value: number) => `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -188,6 +189,10 @@ const FinancialsPage: React.FC = () => {
 
     // Accordion State: Set of "Month-Year" strings that are expanded
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+    // Modal & Delete State
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [deleteLoading, setDeleteLoading] = useState(false);
 
     const [allInjections, setAllInjections] = useState<any[]>([]);
 
@@ -459,17 +464,63 @@ const FinancialsPage: React.FC = () => {
     };
     const handleDelete = async () => {
         if (selectedRows.size === 0) return;
-        if (!window.confirm(`Excluir ${selectedRows.size} registro(s)?`)) return;
-        setProcessing(true);
+        setIsDeleteModalOpen(true);
+    };
+
+    const confirmDeleteAction = async () => {
+        setDeleteLoading(true);
         try {
             const selectedIds = Array.from(selectedRows);
-            const injectionIds = records.filter(r => selectedIds.includes(r.id) && r.injection_id).map(r => r.injection_id);
-            if (injectionIds.length > 0) await supabase.from('injections').update({ is_paid: false }).in('id', injectionIds);
-            await supabase.from('financial_records').delete().in('id', selectedIds);
+            console.log('Selected IDs for deletion:', selectedIds);
+
+            // 1. Identify related Injections to mark as unpaid
+            // Ensure we handle both string IDs and object relations if any
+            const injectionIds = records
+                .filter(r => selectedIds.includes(r.id))
+                .map(r => {
+                    // Check if injection_id is directly available or nested
+                    if (r.injection_id) return r.injection_id;
+                    if (r.injections && r.injections.id) return r.injections.id;
+                    return null;
+                })
+                .filter(id => id !== null);
+
+            console.log('Related Injection IDs:', injectionIds);
+
+            // 2. Update Injections first (if any)
+            if (injectionIds.length > 0) {
+                const { error: updateError } = await supabase
+                    .from('injections')
+                    .update({ is_paid: false })
+                    .in('id', injectionIds);
+                if (updateError) {
+                    console.error('Error updating injections:', updateError);
+                    throw updateError;
+                }
+            }
+
+            // 3. Delete Financial Records
+            const { error: deleteError } = await supabase
+                .from('financial_records')
+                .delete()
+                .in('id', selectedIds);
+
+            if (deleteError) {
+                console.error('Error deleting records:', deleteError);
+                throw deleteError;
+            }
+
+            // 4. Update UI
             setRecords(prev => prev.filter(r => !selectedRows.has(r.id)));
             setSelectedRows(new Set());
-        } catch (err) { console.error(err); alert('Erro ao excluir faturas.'); }
-        finally { setProcessing(false); }
+            setIsDeleteModalOpen(false); // Close modal on success
+
+        } catch (err) {
+            console.error('Full delete error:', err);
+            alert('Erro ao excluir as transações. Verifique o console para mais detalhes.');
+        } finally {
+            setDeleteLoading(false);
+        }
     };
     const totalSelected = useMemo(() => records.filter(row => selectedRows.has(row.id)).reduce((sum, row) => sum + Number(row.amount), 0), [selectedRows, records]);
     const getStatusBadge = (status: string) => {
@@ -545,7 +596,7 @@ const FinancialsPage: React.FC = () => {
                         </div>
                         <div className="p-6 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
                             <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6 text-center">Status de Pagamentos</h3>
-                            <div className="h-[250px] w-full flex items-center justify-center">
+                            <div className="w-full h-auto min-h-[300px] flex items-center justify-center">
                                 <FinancialDonutChart data={metrics.donutData} totalLabel="Volume Total" valueFormatter={formatCurrency} />
                             </div>
                         </div>
@@ -679,12 +730,12 @@ const FinancialsPage: React.FC = () => {
                                 <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Total: <span className="text-slate-900 dark:text-white font-bold font-mono text-base ml-1">{formatCurrency(totalSelected)}</span></p>
                             </div>
                             <div className="flex items-center gap-3 w-full sm:w-auto">
-                                <button onClick={() => setSelectedRows(new Set())} className="flex-1 sm:flex-none h-12 sm:h-10 px-6 rounded-xl sm:rounded-lg border border-slate-200 font-bold text-slate-600">Cancelar</button>
+                                <button onClick={() => setSelectedRows(new Set())} className="flex-1 sm:flex-none h-12 sm:h-10 px-6 rounded-xl sm:rounded-lg border border-slate-200 font-bold text-slate-600 hover:bg-slate-50 transition-colors">Cancelar</button>
                                 <button onClick={handleDelete} disabled={processing} className="flex-1 sm:flex-none h-12 sm:h-10 px-6 rounded-xl sm:rounded-lg bg-red-50 text-red-600 border border-red-200 font-bold hover:bg-red-100 transition-colors flex items-center justify-center gap-2">
                                     {processing ? <span className="material-symbols-outlined animate-spin text-[20px]">refresh</span> : <span className="material-symbols-outlined text-[20px]">delete</span>}
                                     <span className="hidden sm:inline">Excluir</span>
                                 </button>
-                                <button onClick={handleMarkAsPaid} disabled={processing} className={`flex-1 sm:flex-none h-12 sm:h-10 px-6 rounded-xl sm:rounded-lg font-bold shadow-lg flex items-center justify-center gap-2 text-white ${hasProcessing ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'}`}>
+                                <button onClick={handleMarkAsPaid} disabled={processing} className={`flex-1 sm:flex-none h-12 sm:h-10 px-6 rounded-xl sm:rounded-lg font-bold shadow-lg flex items-center justify-center gap-2 text-white transition-all ${hasProcessing ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'}`}>
                                     {processing ? <span className="material-symbols-outlined animate-spin">refresh</span> : <span className="material-symbols-outlined">{hasProcessing ? 'check' : 'payments'}</span>}
                                     {processing ? '...' : (hasProcessing ? 'Confirmar' : 'Pagar')}
                                 </button>
@@ -695,6 +746,14 @@ const FinancialsPage: React.FC = () => {
             )}
 
             <MedicationProfitability />
+
+            <ConfirmDeleteModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={confirmDeleteAction}
+                itemName={`${selectedRows.size} transação(ões)`}
+                loading={deleteLoading}
+            />
         </div>
     );
 };
