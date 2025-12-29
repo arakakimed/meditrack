@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import TagManagerModal, { TAG_COLORS } from './TagManagerModal';
 
@@ -288,6 +288,7 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ onViewPatient, onEditPatien
                         return (
                             <div
                                 key={patient.id}
+                                id={`patient-card-${patient.id}`}
                                 className={`bg-white dark:bg-slate-800 rounded-2xl border transition-all duration-300 overflow-hidden ${isExpanded
                                     ? 'border-primary/50 shadow-lg shadow-primary/5 ring-1 ring-primary/10'
                                     : 'border-slate-200 dark:border-slate-700 shadow-sm hover:border-slate-300 dark:hover:border-slate-600'
@@ -295,7 +296,19 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ onViewPatient, onEditPatien
                             >
                                 {/* Header - Always Visible */}
                                 <div
-                                    onClick={() => setExpandedPatientId(isExpanded ? null : patient.id)}
+                                    onClick={() => {
+                                        const newExpanded = isExpanded ? null : patient.id;
+                                        setExpandedPatientId(newExpanded);
+                                        // Scroll into view after expansion
+                                        if (newExpanded) {
+                                            setTimeout(() => {
+                                                const element = document.getElementById(`patient-card-${patient.id}`);
+                                                if (element) {
+                                                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                                }
+                                            }, 50);
+                                        }
+                                    }}
                                     className="p-4 flex items-center justify-between cursor-pointer active:bg-slate-50 dark:active:bg-slate-700/50 transition-colors"
                                 >
                                     <div className="flex items-center gap-4">

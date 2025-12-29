@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Patient, Appointment } from '../types';
 import NewAppointmentModal from './NewAppointmentModal';
+import { TAG_COLORS } from './TagManagerModal';
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
@@ -20,7 +21,7 @@ interface CalendarEvent {
     type: 'injection' | 'forecast';
     status: 'Applied' | 'Scheduled' | 'Delayed' | 'Skipped' | 'Current';
     dosage?: string;
-    journeyStatus?: string; // To store original status like 'Atual'
+    journeyStatus?: string;
 }
 
 const CalendarHeader: React.FC<{
@@ -54,298 +55,191 @@ const CalendarHeader: React.FC<{
     </div>
 );
 
-const AppointmentItem: React.FC<{ event: CalendarEvent, tagMap: TagMap, onViewPatient: (patientId: string) => void }> = ({ event, tagMap, onViewPatient }) => {
-    // Determine status
-    const isCurrent = event.status === 'Current';
-
-    // Get Primary Tag Color
+// Appointment Card Component with Tag Colors
+const AppointmentListItem: React.FC<{
+    event: CalendarEvent;
+    tagMap: TagMap;
+    onViewPatient: (patientId: string) => void;
+}> = ({ event, tagMap, onViewPatient }) => {
     const firstTagId = event.patientTags?.[0];
     const tagData = firstTagId ? tagMap[firstTagId] : null;
-    const tagColor = tagData?.color?.toLowerCase() || 'slate';
+    const tagColorName = tagData?.color || 'Slate';
 
-    // Time formatting
-    const time = event.date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-    // Helper for color styles
-    const getColorClasses = (color: string) => {
-        const map: Record<string, string> = {
-            rose: 'bg-rose-50 border-rose-100 hover:border-rose-300 text-rose-900',
-            pink: 'bg-pink-50 border-pink-100 hover:border-pink-300 text-pink-900',
-            fuchsia: 'bg-fuchsia-50 border-fuchsia-100 hover:border-fuchsia-300 text-fuchsia-900',
-            purple: 'bg-purple-50 border-purple-100 hover:border-purple-300 text-purple-900',
-            violet: 'bg-violet-50 border-violet-100 hover:border-violet-300 text-violet-900',
-            indigo: 'bg-indigo-50 border-indigo-100 hover:border-indigo-300 text-indigo-900',
-            blue: 'bg-blue-50 border-blue-100 hover:border-blue-300 text-blue-900',
-            sky: 'bg-sky-50 border-sky-100 hover:border-sky-300 text-sky-900',
-            cyan: 'bg-cyan-50 border-cyan-100 hover:border-cyan-300 text-cyan-900',
-            teal: 'bg-teal-50 border-teal-100 hover:border-teal-300 text-teal-900',
-            emerald: 'bg-emerald-50 border-emerald-100 hover:border-emerald-300 text-emerald-900',
-            green: 'bg-green-50 border-green-100 hover:border-green-300 text-green-900',
-            lime: 'bg-lime-50 border-lime-100 hover:border-lime-300 text-lime-900',
-            yellow: 'bg-yellow-50 border-yellow-100 hover:border-yellow-300 text-yellow-900',
-            amber: 'bg-amber-50 border-amber-100 hover:border-amber-300 text-amber-900',
-            orange: 'bg-orange-50 border-orange-100 hover:border-orange-300 text-orange-900',
-            red: 'bg-red-50 border-red-100 hover:border-red-300 text-red-900',
-            slate: 'bg-slate-50 border-slate-100 hover:border-slate-300 text-slate-900',
-            gray: 'bg-gray-50 border-gray-100 hover:border-gray-300 text-gray-900',
-            zinc: 'bg-zinc-50 border-zinc-100 hover:border-zinc-300 text-zinc-900',
-            neutral: 'bg-neutral-50 border-neutral-100 hover:border-neutral-300 text-neutral-900',
-            stone: 'bg-stone-50 border-stone-100 hover:border-stone-300 text-stone-900',
-        };
-        return map[color] || map['slate'];
-    };
-
-    const colorClass = getColorClasses(tagColor);
+    const tagColorData = TAG_COLORS.find(c => c.name === tagColorName) || TAG_COLORS[TAG_COLORS.length - 1];
 
     return (
         <div
             onClick={() => onViewPatient(event.patientId)}
-            className={`
-                group flex items-center gap-2 p-2 mb-1.5 rounded-lg border transition-all cursor-pointer shadow-sm
-                ${colorClass}
-                ${isCurrent ? 'ring-1 ring-blue-400 ring-offset-1' : ''}
-            `}
+            className="relative flex items-center gap-3 p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-primary/50 hover:shadow-lg transition-all cursor-pointer group overflow-hidden"
         >
-            {/* Avatar removed per user request */}
+            {/* Colored Left Border */}
+            <div
+                className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-xl"
+                style={{ backgroundColor: tagColorData.hex }}
+            />
+
+            {/* Avatar or Initial Badge with Tag Color */}
+            {event.patientAvatar ? (
+                <div className="relative flex-shrink-0">
+                    <img src={event.patientAvatar} alt={event.patientName} className="w-12 h-12 rounded-full object-cover ring-2 ring-offset-2" style={{ ringColor: tagColorData.hex }} />
+                </div>
+            ) : (
+                <div
+                    className="w-12 h-12 rounded-full flex items-center justify-center text-base font-bold shadow-sm flex-shrink-0"
+                    style={{
+                        backgroundColor: tagColorData.hex,
+                        color: '#fff'
+                    }}
+                >
+                    {event.patientInitials}
+                </div>
+            )}
 
             {/* Info */}
-            <div className="flex items-center justify-between min-w-0 flex-1">
-                <span className="text-[11px] font-bold leading-tight truncate opacity-90">
-                    {event.patientName}
-                </span>
+            <div className="flex-1 min-w-0">
+                <p className="font-bold text-base text-slate-900 dark:text-white truncate mb-1">{event.patientName}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm text-slate-600 dark:text-slate-400">{event.dosage || 'Sem dosagem'}</span>
+                    {tagData && (
+                        <span
+                            className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                            style={{
+                                backgroundColor: `${tagColorData.hex}20`,
+                                color: tagColorData.hex,
+                                border: `1px solid ${tagColorData.hex}40`
+                            }}
+                        >
+                            {tagData.name}
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Status Icons */}
+            <div className="flex flex-col items-center gap-1 flex-shrink-0">
                 {event.status === 'Applied' && (
-                    <span className="material-symbols-outlined text-[14px] text-emerald-600 ml-1" title="Aplicada">
-                        check_circle
+                    <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                        <span className="material-symbols-outlined text-xl">check_circle</span>
+                        <span className="text-xs font-semibold">Aplicado</span>
+                    </div>
+                )}
+                {event.status === 'Current' && (
+                    <span className="text-xs px-3 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-bold">
+                        Atual
                     </span>
                 )}
             </div>
         </div>
-    )
-}
+    );
+};
 
 const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = ({ onViewPatient }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
+    const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [events, setEvents] = useState<CalendarEvent[]>([]);
+    const [tagMap, setTagMap] = useState<TagMap>({});
     const [loading, setLoading] = useState(true);
     const [isNewAppointmentModalOpen, setIsNewAppointmentModalOpen] = useState(false);
-    const [tagMap, setTagMap] = useState<TagMap>({});
+
+    useEffect(() => {
+        fetchEvents();
+        fetchTags();
+    }, [currentDate]);
+
+    const fetchTags = async () => {
+        const { data, error } = await supabase.from('tags').select('id, name, color');
+        if (!error && data) {
+            const map: TagMap = {};
+            data.forEach(tag => {
+                map[tag.id] = { name: tag.name, color: tag.color };
+            });
+            setTagMap(map);
+        }
+    };
 
     const fetchEvents = async () => {
         setLoading(true);
         const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
         const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
 
-        // Adjust buffers for calendar view (overflow days)
-        startOfMonth.setDate(startOfMonth.getDate() - 7);
-        endOfMonth.setDate(endOfMonth.getDate() + 14);
+        const { data: patients, error: patientsError } = await supabase
+            .from('patients')
+            .select('id, name, avatar_url, tags');
 
-        try {
-            const startStr = startOfMonth.toISOString();
-            const endStr = endOfMonth.toISOString();
+        if (patientsError || !patients) {
+            setLoading(false);
+            return;
+        }
 
-            // 0. Fetch Clinic Tags and build Map
-            const { data: tagsData } = await supabase.from('clinic_tags').select('id, name, color');
-            const newTagMap: TagMap = {};
-            tagsData?.forEach((t: any) => {
-                newTagMap[t.id] = { name: t.name, color: t.color };
-            });
-            setTagMap(newTagMap);
+        const allEvents: CalendarEvent[] = [];
 
-            // 1. Fetch Injections (Done/Skipped)
+        for (const patient of patients) {
             const { data: injections } = await supabase
                 .from('injections')
-                .select(`
-                    id, 
-                    applied_at, 
-                    created_at,
-                    status, 
-                    dosage,
-                    patient:patients (id, name, initials, avatar_url, tags)
-                `);
+                .select('id, date, dosage, status')
+                .eq('patient_id', patient.id)
+                .gte('date', startOfMonth.toISOString())
+                .lte('date', endOfMonth.toISOString());
 
-            // 2. Fetch Medication Steps (Forecast)
+            if (injections) {
+                injections.forEach(inj => {
+                    const initials = patient.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+                    allEvents.push({
+                        id: inj.id,
+                        date: new Date(inj.date),
+                        patientId: patient.id,
+                        patientName: patient.name,
+                        patientInitials: initials,
+                        patientAvatar: patient.avatar_url,
+                        patientTags: patient.tags,
+                        type: 'injection',
+                        status: inj.status || 'Scheduled',
+                        dosage: inj.dosage ? `${inj.dosage} mg` : undefined
+                    });
+                });
+            }
+
             const { data: steps } = await supabase
                 .from('medication_steps')
-                .select(`
-                    id,
-                    date,
-                    status,
-                    dosage,
-                    patient:patients (id, name, initials, avatar_url, tags)
-                `);
+                .select('id, patient_id, step_date, dosage, status')
+                .eq('patient_id', patient.id)
+                .gte('step_date', startOfMonth.toISOString())
+                .lte('step_date', endOfMonth.toISOString());
 
-            const allEvents: CalendarEvent[] = [];
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-
-            // Process Injections
-            injections?.forEach((inj: any) => {
-                // Fallback to created_at if applied_at is missing
-                const dateSource = inj.applied_at || inj.created_at;
-                if (!dateSource || !inj.patient) return;
-
-                let dateObj: Date;
-                // Robust parsing to force Local Timestamp at Noon (12:00:00)
-                if (dateSource.includes('T')) {
-                    const [y, m, d] = dateSource.split('T')[0].split('-').map(Number);
-                    dateObj = new Date(y, m - 1, d, 12, 0, 0);
-                } else if (dateSource.includes('-')) {
-                    const [y, m, d] = dateSource.split('-').map(Number);
-                    dateObj = new Date(y, m - 1, d, 12, 0, 0);
-                } else {
-                    dateObj = new Date(dateSource);
-                    dateObj.setHours(12, 0, 0, 0);
-                }
-
-                // Fix: Check for 'Applied' (DB value) not 'Aplicada' (UI value)
-                const status = (inj.status === 'Applied' || inj.status === 'Aplicada') ? 'Applied' : 'Skipped';
-
-                allEvents.push({
-                    id: inj.id,
-                    date: dateObj,
-                    patientId: inj.patient.id,
-                    patientName: inj.patient.name,
-                    patientInitials: inj.patient.initials,
-                    patientAvatar: inj.patient.avatar_url,
-                    patientTags: inj.patient.tags,
-                    type: 'injection',
-                    status: status,
-                    dosage: inj.dosage
+            if (steps) {
+                steps.forEach(step => {
+                    const initials = patient.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+                    allEvents.push({
+                        id: step.id,
+                        date: new Date(step.step_date),
+                        patientId: patient.id,
+                        patientName: patient.name,
+                        patientInitials: initials,
+                        patientAvatar: patient.avatar_url,
+                        patientTags: patient.tags,
+                        type: 'forecast',
+                        status: step.status || 'Scheduled',
+                        dosage: step.dosage ? `${step.dosage} mg` : undefined,
+                        journeyStatus: step.status
+                    });
                 });
-            });
-
-            // Process Forecast Steps
-            steps?.forEach((step: any) => {
-                // console.log('DEBUG: Processing step', step);
-                if (!step.patient || !step.date) return;
-
-                // Try parsing date - handle both YYYY-MM-DD and "dd de MMM" strings
-                let dateObj: Date | null = null;
-                const dateStr = step.date;
-
-                if (dateStr.includes('-') && !dateStr.includes('de')) {
-                    // ISO YYYY-MM-DD
-                    const cleanDate = dateStr.split('T')[0];
-                    const [y, m, d] = cleanDate.split('-').map(Number);
-                    dateObj = new Date(y, m - 1, d, 12, 0, 0);
-                } else if (dateStr.includes('de')) {
-                    // "26 de dez." format
-                    const parts = dateStr.split(' de ');
-                    if (parts.length >= 2) {
-                        const day = parseInt(parts[0]);
-                        let monthStr = parts[1].toLowerCase().replace('.', '').trim();
-                        // Map months
-                        const monthMap: { [key: string]: number } = {
-                            'jan': 0, 'fev': 1, 'mar': 2, 'abr': 3, 'mai': 4, 'jun': 5,
-                            'jul': 6, 'ago': 7, 'set': 8, 'out': 9, 'nov': 10, 'dez': 11
-                        };
-                        const month = monthMap[monthStr];
-                        if (month !== undefined) {
-                            const year = new Date().getFullYear(); // Assume current year
-                            dateObj = new Date(year, month, day, 12, 0, 0);
-                        }
-                    }
-                }
-
-                if (!dateObj) {
-                    console.warn('DEBUG: Invalid date format', step.date);
-                    return;
-                }
-
-                if (!dateObj) return;
-
-                // Check conflict: Is there already an injection for this patient on this date?
-                // If status is 'Concluído', we skip it because it should be in the 'injections' list (History)
-                if (step.status === 'Concluído') return;
-
-                // Determine Status
-                let status: 'Scheduled' | 'Delayed' | 'Current' = 'Scheduled';
-
-                if (step.status === 'Atual') {
-                    status = 'Current';
-                } else if (dateObj < today) {
-                    status = 'Delayed';
-                }
-
-                allEvents.push({
-                    id: step.id,
-                    date: dateObj,
-                    patientId: step.patient.id,
-                    patientName: step.patient.name,
-                    patientInitials: step.patient.initials,
-                    patientAvatar: step.patient.avatar_url,
-                    patientTags: step.patient.tags,
-                    type: 'forecast',
-                    status: status,
-                    dosage: step.dosage,
-                    journeyStatus: step.status
-                });
-            });
-
-            setEvents(allEvents);
-
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchEvents();
-    }, [currentDate]);
-
-    const calendarDays = useMemo(() => {
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth();
-        const firstDayOfMonth = new Date(year, month, 1);
-        const lastDayOfMonth = new Date(year, month + 1, 0);
-        const startDayOfWeek = firstDayOfMonth.getDay();
-        const endDayOfWeek = lastDayOfMonth.getDay();
-
-        const days = [];
-
-        // Days from previous month
-        for (let i = startDayOfWeek; i > 0; i--) {
-            const date = new Date(year, month, 1 - i);
-            days.push({ date, isCurrentMonth: false });
-        }
-
-        // Days from current month
-        for (let i = 1; i <= lastDayOfMonth.getDate(); i++) {
-            const date = new Date(year, month, i);
-            days.push({ date, isCurrentMonth: true });
-        }
-
-        // Days from next month
-        for (let i = 1; i < 7 - endDayOfWeek; i++) {
-            const date = new Date(year, month + 1, i);
-            days.push({ date, isCurrentMonth: false });
-        }
-
-        return days;
-    }, [currentDate]);
-
-    // Helper for consistent keys
-    const getDateKey = (date: Date) => {
-        return `${date.getFullYear()} -${String(date.getMonth() + 1).padStart(2, '0')} -${String(date.getDate()).padStart(2, '0')} `;
-    };
-
-    const eventsByDay = useMemo(() => {
-        const grouped: { [key: string]: CalendarEvent[] } = {};
-        events.forEach(ev => {
-            const key = getDateKey(ev.date);
-            if (!grouped[key]) {
-                grouped[key] = [];
             }
-            grouped[key].push(ev);
-        });
-        return grouped;
-    }, [events]);
+        }
+
+        setEvents(allEvents);
+        setLoading(false);
+    };
 
     const handlePrevMonth = () => setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
     const handleNextMonth = () => setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-    const handleToday = () => setCurrentDate(new Date());
+    const handleToday = () => {
+        const today = new Date();
+        setCurrentDate(today);
+        setSelectedDate(today);
+        setTimeout(() => {
+            document.getElementById('appointment-list')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 100);
+    };
 
     const isToday = (date: Date) => {
         const today = new Date();
@@ -354,8 +248,89 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
             date.getFullYear() === today.getFullYear();
     };
 
+    const isSameDay = (date1: Date | null, date2: Date) => {
+        if (!date1) return false;
+        return date1.getDate() === date2.getDate() &&
+            date1.getMonth() === date2.getMonth() &&
+            date1.getFullYear() === date2.getFullYear();
+    };
+
+    const handleDayClick = (date: Date, hasEvents: boolean) => {
+        if (isSameDay(selectedDate, date)) {
+            setSelectedDate(null);
+        } else {
+            setSelectedDate(date);
+            setTimeout(() => {
+                document.getElementById('appointment-list')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 100);
+        }
+    };
+
+    const getTagColor = (tagId: string | undefined) => {
+        if (!tagId) return '#94a3b8';
+        const tag = tagMap[tagId];
+        if (!tag) return '#94a3b8';
+        const colorData = TAG_COLORS.find(c => c.name === tag.color);
+        return colorData?.hex || '#94a3b8';
+    };
+
+    const getUniqueDotColors = (events: CalendarEvent[]) => {
+        const colorSet = new Set<string>();
+        events.forEach(ev => {
+            const tagId = ev.patientTags?.[0];
+            const color = getTagColor(tagId);
+            colorSet.add(color);
+        });
+        return Array.from(colorSet).slice(0, 3);
+    };
+
+    const getDateKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+
+    const eventsByDay = useMemo(() => {
+        const map: { [key: string]: CalendarEvent[] } = {};
+        events.forEach(event => {
+            const key = getDateKey(event.date);
+            if (!map[key]) map[key] = [];
+            map[key].push(event);
+        });
+        return map;
+    }, [events]);
+
+    const calendarDays = useMemo(() => {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        const startingDayOfWeek = firstDay.getDay();
+        const daysInMonth = lastDay.getDate();
+
+        const days: { date: Date; isCurrentMonth: boolean }[] = [];
+
+        for (let i = 0; i < startingDayOfWeek; i++) {
+            const prevMonthDay = new Date(year, month, -startingDayOfWeek + i + 1);
+            days.push({ date: prevMonthDay, isCurrentMonth: false });
+        }
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            days.push({ date: new Date(year, month, day), isCurrentMonth: true });
+        }
+
+        const remainingDays = 42 - days.length;
+        for (let i = 1; i <= remainingDays; i++) {
+            days.push({ date: new Date(year, month + 1, i), isCurrentMonth: false });
+        }
+
+        return days;
+    }, [currentDate]);
+
+    const selectedDayEvents = useMemo(() => {
+        if (!selectedDate) return [];
+        const key = getDateKey(selectedDate);
+        return eventsByDay[key] || [];
+    }, [selectedDate, eventsByDay]);
+
     return (
-        <div className="h-full flex flex-col">
+        <div className="h-full flex flex-col overflow-hidden">
             <CalendarHeader
                 currentDate={currentDate}
                 onPrevMonth={handlePrevMonth}
@@ -364,42 +339,134 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
                 onNewAppointment={() => setIsNewAppointmentModalOpen(true)}
             />
 
-            <div className="grid grid-cols-7 bg-white dark:bg-surface-dark border-y border-x border-slate-200 dark:border-slate-700 rounded-t-lg">
-                {WEEKDAYS.map(day => (
-                    <div key={day} className="text-center p-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-slate-700">
-                        {day}
-                    </div>
-                ))}
-            </div>
+            {/* Calendar Grid - Compact and Fixed */}
+            <div className="flex-shrink-0 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+                {/* Weekday Headers */}
+                <div className="grid grid-cols-7 border-b border-slate-200 dark:border-slate-700">
+                    {WEEKDAYS.map(day => (
+                        <div key={day} className="text-center py-2 text-[10px] sm:text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wide">
+                            {day}
+                        </div>
+                    ))}
+                </div>
 
-            <div className={`grid grid-cols-7 grid-rows-5 flex-1 border-b border-x border-slate-200 dark:border-slate-700 rounded-b-lg overflow-hidden transition-opacity duration-300 ${loading ? 'opacity-50' : 'opacity-100'}`}>
-                {calendarDays.map(({ date, isCurrentMonth }, index) => {
-                    const dayEvents = eventsByDay[getDateKey(date)] || [];
+                {/* Calendar Days - Compact Layout */}
+                <div className={`grid grid-cols-7 ${loading ? 'opacity-50' : 'opacity-100'} transition-opacity`}>
+                    {calendarDays.map(({ date, isCurrentMonth }, index) => {
+                        const dayKey = getDateKey(date);
+                        const dayEvents = eventsByDay[dayKey] || [];
+                        const hasEvents = dayEvents.length > 0;
+                        const isSelected = isSameDay(selectedDate, date);
+                        const isTodayDay = isToday(date);
+                        const uniqueColors = getUniqueDotColors(dayEvents);
 
-                    return (
-                        <div key={index} className={`relative p-2 border-r border-t border-slate-200 dark:border-slate-700 flex flex-col ${isCurrentMonth ? '' : 'bg-slate-50/50 dark:bg-slate-800/20'}`}>
-                            <div className="flex justify-between items-center mb-1">
-                                {dayEvents.length > 0 && isCurrentMonth && (
-                                    <span className="text-[10px] font-bold text-slate-400">{dayEvents.length}</span>
-                                )}
-                                <time dateTime={date.toISOString()} className={`ml-auto text-xs font-semibold flex items-center justify-center size-6 rounded-full ${isToday(date) ? 'bg-primary text-white' : isCurrentMonth ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400 dark:text-slate-500'}`}>
+                        return (
+                            <div
+                                key={index}
+                                onClick={() => handleDayClick(date, isCurrentMonth)}
+                                className={`
+                                    relative min-h-[50px] sm:min-h-[60px] p-1.5 sm:p-2 flex flex-col items-center justify-start
+                                    border-r border-b border-slate-100 dark:border-slate-700/50
+                                    transition-all cursor-pointer
+                                    ${!isCurrentMonth ? 'bg-slate-50/50 dark:bg-slate-900/20' : 'bg-white dark:bg-slate-800'}
+                                    ${hasEvents && isCurrentMonth ? 'hover:bg-blue-50/50 dark:hover:bg-blue-900/10' : ''}
+                                    ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20 ring-2 ring-inset ring-primary' : ''}
+                                `}
+                            >
+                                {/* Day Number - Large and Bold */}
+                                <time
+                                    dateTime={date.toISOString()}
+                                    className={`
+                                        text-base sm:text-lg font-bold mb-0.5
+                                        flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full
+                                        transition-all
+                                        ${isTodayDay ? 'bg-primary text-white scale-110' : ''}
+                                        ${isSelected && !isTodayDay ? 'bg-primary/10 text-primary ring-2 ring-primary/30' : ''}
+                                        ${!isTodayDay && !isSelected && isCurrentMonth ? 'text-slate-800 dark:text-slate-200' : ''}
+                                        ${!isTodayDay && !isSelected && !isCurrentMonth ? 'text-slate-400 dark:text-slate-600' : ''}
+                                    `}
+                                >
                                     {date.getDate()}
                                 </time>
+
+                                {/* Event Dots - Compact */}
+                                {hasEvents && isCurrentMonth && (
+                                    <div className="flex items-center justify-center gap-0.5 mt-auto">
+                                        {uniqueColors.map((color, idx) => (
+                                            <div
+                                                key={idx}
+                                                className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full"
+                                                style={{ backgroundColor: color }}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
                             </div>
-                            <div className="flex-1 overflow-y-auto space-y-1 -mx-1 px-1 custom-scrollbar">
-                                {dayEvents.map(ev => (
-                                    <AppointmentItem
-                                        key={ev.id}
-                                        event={ev}
-                                        tagMap={tagMap}
-                                        onViewPatient={onViewPatient}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                    );
-                })}
+                        );
+                    })}
+                </div>
             </div>
+
+            {/* Appointment List Slider - Scrollable */}
+            {selectedDate && (
+                <div id="appointment-list" className="flex-1 overflow-y-auto mt-6 animate-in slide-in-from-top-4 duration-300">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 sm:p-6 shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                                {selectedDate.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                            </h3>
+                            <button
+                                onClick={() => setSelectedDate(null)}
+                                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                            >
+                                <span className="material-symbols-outlined text-slate-500">close</span>
+                            </button>
+                        </div>
+
+                        {selectedDayEvents.length > 0 ? (
+                            <>
+                                <div className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                                    {selectedDayEvents.length} {selectedDayEvents.length === 1 ? 'agendamento' : 'agendamentos'}
+                                </div>
+
+                                <div className="space-y-2">
+                                    {selectedDayEvents.map(event => (
+                                        <AppointmentListItem
+                                            key={event.id}
+                                            event={event}
+                                            tagMap={tagMap}
+                                            onViewPatient={onViewPatient}
+                                        />
+                                    ))}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center py-12 text-center">
+                                <div className="w-20 h-20 mb-4 rounded-full bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 flex items-center justify-center">
+                                    <span className="material-symbols-outlined text-5xl text-blue-500 dark:text-blue-400">
+                                        event_available
+                                    </span>
+                                </div>
+                                <h4 className="text-lg font-bold text-slate-700 dark:text-slate-300 mb-2">
+                                    Nenhum agendamento
+                                </h4>
+                                <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xs">
+                                    {isToday(selectedDate)
+                                        ? "Você está livre hoje! Aproveite para descansar ou planejar novos atendimentos."
+                                        : "Não há agendamentos para este dia. Que tal aproveitar para organizar sua agenda?"}
+                                </p>
+                                <button
+                                    onClick={() => setIsNewAppointmentModalOpen(true)}
+                                    className="mt-6 px-4 py-2 bg-primary hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
+                                >
+                                    <span className="material-symbols-outlined text-lg">add</span>
+                                    Novo Agendamento
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             <NewAppointmentModal
                 isOpen={isNewAppointmentModalOpen}
