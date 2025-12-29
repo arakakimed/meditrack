@@ -98,10 +98,10 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ onViewPatient, onEditPatien
                 const patientInjections = (injectionsData || []).filter(inj => inj.patient_id === patient.id && inj.patient_weight_at_injection);
                 const latestInj = patientInjections.length > 0 ? patientInjections[0] : null;
 
-                // Priority: Latest Injection > DB Current > DB Initial
+                // Priority: Latest Injection > DB Initial (Ignore stale DB current)
                 const dynamicCurrentWeight = latestInj
                     ? latestInj.patient_weight_at_injection
-                    : (patient.current_weight || patient.initial_weight);
+                    : patient.initial_weight;
 
                 const initial = patient.initial_weight || 0;
                 const current = dynamicCurrentWeight || 0;

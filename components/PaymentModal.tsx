@@ -1,299 +1,256 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { MedicationStep } from '../types';
+import { Injection } from '../types';
 
 interface PaymentModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSuccess: () => void;
-    step: MedicationStep;
     patientId: string;
-    patientName: string;
+    pendingInjections: Injection[];
+    onSuccess: () => void;
 }
 
-const PaymentModal: React.FC<PaymentModalProps> = ({
-    isOpen,
-    onClose,
-    onSuccess,
-    step,
-    patientId,
-    patientName
-}) => {
-    const [loading, setLoading] = useState(false);
-    const [paymentDate, setPaymentDate] = useState('');
-    const [paymentValue, setPaymentValue] = useState('60');
-    const [pixAccount, setPixAccount] = useState('');
-    const [notes, setNotes] = useState('');
-    const [error, setError] = useState<string | null>(null);
-    const [isPaid, setIsPaid] = useState(false);
+const PIX_KEY = "61 98404-8711";
+const PIX_NAME = "Renan Arakaki de Oliveira";
 
+const formatCurrency = (value: number) => `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, patientId, pendingInjections, onSuccess }) => {
+    const [mode, setMode] = useState<'menu' | 'credit' | 'debt' | 'pix' | 'success'>('menu');
+    const [packages, setPackages] = useState<any[]>([]);
+    const [selectedPackage, setSelectedPackage] = useState<any>(null);
+    const [loading, setLoading] = useState(false);
+    const [processing, setProcessing] = useState(false);
+    const [paymentValue, setPaymentValue] = useState(0);
+
+    // Reset state on open
     useEffect(() => {
         if (isOpen) {
-            const today = new Date().toISOString().split('T')[0];
-            setPaymentDate(today);
-            setPaymentValue('60');
-            setPixAccount('');
-            setNotes('');
-            setError(null);
-            setLoading(false);
-
-            // Check if this step already has a payment
-            checkExistingPayment();
+            setMode('menu');
+            setSelectedPackage(null);
+            setProcessing(false);
+            fetchPackages();
         }
-    }, [isOpen, step.id]);
+    }, [isOpen]);
 
-    const checkExistingPayment = async () => {
-        if (!step.id) return;
+    const fetchPackages = async () => {
+        try {
+            // Find Tirzepatida medication
+            const { data: meds } = await supabase.from('medications').select('*').ilike('name', '%tirzepatida%').limit(1);
+            if (meds && meds.length > 0) {
+                const med = meds[0];
+                // Try to get from localStorage (User preference)
+                const localPackages = localStorage.getItem(`med_packages_${med.id}`);
+                if (localPackages) {
+                    setPackages(JSON.parse(localPackages));
+                } else {
+                    // Fallback to defaults
+                    setPackages([
+                        { dosage: 2.5, price: 250, enabled: true },
+                        { dosage: 5, price: 400, enabled: true },
+                        { dosage: 7.5, price: 550, enabled: true },
+                        { dosage: 10, price: 700, enabled: true },
+                        { dosage: 12.5, price: 850, enabled: true },
+                        { dosage: 15, price: 1000, enabled: true },
+                    ]);
+                }
+            } else {
+                // Absolute fallback if no medication found
+                setPackages([
+                    { dosage: 2.5, price: 250, enabled: true },
+                    { dosage: 5, price: 400, enabled: true },
+                    { dosage: 7.5, price: 550, enabled: true },
+                    { dosage: 10, price: 700, enabled: true },
+                    { dosage: 12.5, price: 850, enabled: true },
+                    { dosage: 15, price: 1000, enabled: true },
+                ]);
+            }
+        } catch (err) {
+            console.error('Error fetching packages', err);
+        }
+    };
 
-        const { data } = await supabase
-            .from('step_payments')
-            .select('*')
-            .eq('step_id', step.id)
-            .single();
-
-        if (data) {
-            setIsPaid(true);
-            setPaymentDate(data.payment_date || '');
-            setPaymentValue(data.amount?.toString() || '60');
-            setPixAccount(data.pix_account || '');
-            setNotes(data.notes || '');
+    const handleSelectOption = (option: 'credit' | 'debt') => {
+        if (option === 'credit') {
+            setMode('credit');
         } else {
-            setIsPaid(false);
+            const total = pendingInjections.reduce((sum, inj) => sum + (inj.doseValue || 0), 0);
+            setPaymentValue(total);
+            setMode('debt');
+        }
+    };
+
+    const handleSelectPackage = (pkg: any) => {
+        setSelectedPackage(pkg);
+        setPaymentValue(pkg.price);
+        setMode('pix');
+    };
+
+    const handleConfirmPayment = async () => {
+        setProcessing(true);
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error("Usuário não autenticado");
+
+            if (selectedPackage) {
+                // CREDIT MODE: Add Record
+                const { error } = await supabase.from('financial_records').insert({
+                    patient_id: patientId,
+                    user_id: user.id,
+                    amount: paymentValue,
+                    description: `Crédito - Pacote ${selectedPackage.dosage}mg`,
+                    due_date: today,
+                    status: 'Em Processamento'
+                });
+                if (error) throw error;
+            } else {
+                // DEBT MODE: Add Records (Processing)
+                // Wait for admin approval to mark as paid
+
+                // Create records
+                const records = pendingInjections.map(inj => ({
+                    patient_id: patientId,
+                    user_id: user.id,
+                    amount: inj.doseValue || 0,
+                    description: `Pagamento - Dose ${inj.dosage} (Aguardando Confirmação)`,
+                    due_date: today,
+                    status: 'Em Processamento',
+                    injection_id: inj.id
+                }));
+
+                if (records.length > 0) {
+                    const { error } = await supabase.from('financial_records').insert(records);
+                    if (error) throw error;
+                }
+            }
+
+            setMode('success');
+            setTimeout(() => {
+                onSuccess();
+                onClose();
+            }, 2000);
+
+        } catch (err) {
+            console.error(err);
+            alert('Erro ao processar pagamento.');
+            setProcessing(false);
         }
     };
 
     if (!isOpen) return null;
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        setError(null);
-
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Usuário não autenticado');
-
-            // Save or update payment record
-            if (isPaid) {
-                // Update existing payment
-                const { error: updateError } = await supabase
-                    .from('step_payments')
-                    .update({
-                        payment_date: paymentDate,
-                        amount: parseFloat(paymentValue) || 0,
-                        pix_account: pixAccount,
-                        notes: notes
-                    })
-                    .eq('step_id', step.id);
-
-                if (updateError) throw updateError;
-            } else {
-                // Create new payment
-                const { error: insertError } = await supabase
-                    .from('step_payments')
-                    .insert([{
-                        step_id: step.id,
-                        patient_id: patientId,
-                        payment_date: paymentDate,
-                        amount: parseFloat(paymentValue) || 0,
-                        pix_account: pixAccount,
-                        notes: notes,
-                        user_id: user.id
-                    }]);
-
-                if (insertError) throw insertError;
-            }
-
-            onClose();
-            requestAnimationFrame(() => {
-                onSuccess();
-            });
-
-        } catch (err: any) {
-            console.error('Error saving payment:', err);
-            setError(err.message || 'Erro ao salvar pagamento');
-            setLoading(false);
-        }
-    };
-
-    const handleRemovePayment = async () => {
-        if (!confirm('Deseja remover o registro de pagamento desta etapa?')) return;
-
-        setLoading(true);
-        try {
-            const { error } = await supabase
-                .from('step_payments')
-                .delete()
-                .eq('step_id', step.id);
-
-            if (error) throw error;
-
-            onClose();
-            requestAnimationFrame(() => {
-                onSuccess();
-            });
-        } catch (err: any) {
-            setError(err.message || 'Erro ao remover pagamento');
-            setLoading(false);
-        }
-    };
-
     return (
-        <div
-            style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 9999,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '1rem',
-                backgroundColor: 'rgba(15, 23, 42, 0.5)',
-                backdropFilter: 'blur(4px)'
-            }}
-            onClick={(e) => {
-                if (e.target === e.currentTarget) onClose();
-            }}
-        >
-            <div
-                style={{
-                    backgroundColor: 'white',
-                    borderRadius: '1rem',
-                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-                    width: '100%',
-                    maxWidth: '26rem',
-                    overflow: 'hidden'
-                }}
-                onClick={(e) => e.stopPropagation()}
-            >
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+
                 {/* Header */}
-                <div className={`px-6 py-4 border-b flex justify-between items-center ${isPaid ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-100' : 'bg-gradient-to-r from-slate-50 to-gray-50 border-slate-100'}`}>
-                    <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isPaid ? 'bg-green-100 text-green-600' : 'bg-slate-200 text-slate-500'}`}>
-                            <span className="material-symbols-outlined">{isPaid ? 'check_circle' : 'payments'}</span>
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-bold text-slate-900">
-                                {isPaid ? 'Pagamento Registrado' : 'Registrar Pagamento'}
-                            </h2>
-                            <p className="text-xs text-slate-500">{step.dosage} • {patientName}</p>
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <div className="p-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 flex justify-between items-center">
+                    <h3 className="font-bold text-slate-800 dark:text-white text-lg">Pagamento</h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                         <span className="material-symbols-outlined">close</span>
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    {error && (
-                        <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg flex items-center gap-2">
-                            <span className="material-symbols-outlined text-base">error</span>
-                            {error}
-                        </div>
-                    )}
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto p-6">
 
-                    {/* Status Badge */}
-                    {isPaid && (
-                        <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <span className="material-symbols-outlined text-green-600">verified</span>
-                                <span className="text-sm font-medium text-green-800">Esta dose está paga</span>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={handleRemovePayment}
-                                className="text-xs text-red-500 hover:text-red-700 font-medium"
-                            >
-                                Remover
+                    {mode === 'menu' && (
+                        <div key="menu" className="space-y-4">
+                            <button onClick={() => handleSelectOption('credit')} className="w-full p-6 rounded-xl border-2 border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-primary hover:bg-primary/5 transition-all text-left group">
+                                <div className="flex items-center gap-4 mb-2">
+                                    <div className="size-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold">
+                                        <span className="material-symbols-outlined text-2xl">add_card</span>
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-slate-900 dark:text-white text-lg group-hover:text-primary">Adicionar Crédito</h4>
+                                        <p className="text-sm text-slate-500">Pagar adiantado (Pacotes)</p>
+                                    </div>
+                                </div>
+                            </button>
+
+                            <button onClick={() => handleSelectOption('debt')} className="w-full p-6 rounded-xl border-2 border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-emerald-500 hover:bg-emerald-50/30 transition-all text-left group">
+                                <div className="flex items-center gap-4 mb-2">
+                                    <div className="size-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold">
+                                        <span className="material-symbols-outlined text-2xl">payments</span>
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-slate-900 dark:text-white text-lg group-hover:text-emerald-600">Quitar Débitos</h4>
+                                        <p className="text-sm text-slate-500">Pagar pendências atuais</p>
+                                    </div>
+                                </div>
+                                <div className="mt-2 pl-16">
+                                    <span className="text-xs font-bold uppercase text-slate-400 tracking-wider">Total Pendente</span>
+                                    <p className="text-2xl font-black text-slate-800 dark:text-white">
+                                        {formatCurrency(pendingInjections.reduce((sum, i) => sum + (i.doseValue || 0), 0))}
+                                    </p>
+                                </div>
                             </button>
                         </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-1">
-                                <span className="flex items-center gap-1">
-                                    <span className="material-symbols-outlined text-sm">calendar_today</span>
-                                    Data do Pagamento
-                                </span>
-                            </label>
-                            <input
-                                required
-                                type="date"
-                                value={paymentDate}
-                                onChange={(e) => setPaymentDate(e.target.value)}
-                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none text-slate-900 text-sm"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-1">Valor</label>
-                            <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 font-mono">R$</span>
-                                <input
-                                    required
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={paymentValue}
-                                    onChange={(e) => setPaymentValue(e.target.value)}
-                                    className="w-full pl-10 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none text-slate-900 text-sm font-mono"
-                                />
+                    {mode === 'credit' && (
+                        <div key="credit" className="animate-slide-up">
+                            <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-4">Escolha um Pacote (Tirzepatida)</h4>
+                            <div className="grid grid-cols-2 gap-3">
+                                {packages.map((pkg, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => handleSelectPackage(pkg)}
+                                        className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-primary hover:bg-primary/5 transition-all text-center"
+                                    >
+                                        <div className="text-lg font-black text-slate-900 dark:text-white">{pkg.dosage} mg</div>
+                                        <div className="text-sm font-bold text-emerald-600">{formatCurrency(pkg.price)}</div>
+                                    </button>
+                                ))}
                             </div>
+                            <button onClick={() => setMode('menu')} className="mt-6 w-full py-3 text-slate-500 font-bold hover:text-slate-700">Voltar</button>
                         </div>
-                    </div>
+                    )}
 
-                    <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1">
-                            <span className="flex items-center gap-1">
-                                <span className="material-symbols-outlined text-sm">pix</span>
-                                Chave PIX / Conta
-                            </span>
-                        </label>
-                        <input
-                            type="text"
-                            value={pixAccount}
-                            onChange={(e) => setPixAccount(e.target.value)}
-                            placeholder="Ex: banco@clinica.com.br"
-                            className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none text-slate-900 text-sm"
-                        />
-                    </div>
+                    {(mode === 'pix' || mode === 'debt') && (
+                        <div key="payment" className="animate-slide-up text-center">
+                            <div className="mb-6">
+                                <p className="text-sm text-slate-500 mb-1">Valor a pagar</p>
+                                <h2 className="text-4xl font-black text-slate-900 dark:text-white">{formatCurrency(paymentValue)}</h2>
+                            </div>
 
-                    <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1">Observações</label>
-                        <textarea
-                            value={notes}
-                            onChange={(e) => setNotes(e.target.value)}
-                            placeholder="Ex: Pago via PIX instantâneo"
-                            rows={2}
-                            className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none text-slate-900 text-sm resize-none"
-                        />
-                    </div>
+                            <div className="bg-slate-50 dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-700 mb-6">
+                                <p className="text-sm font-bold text-slate-500 mb-4">Chave PIX (Celular)</p>
+                                <div className="flex items-center justify-center gap-2 mb-2">
+                                    <code className="text-xl font-mono font-bold text-primary bg-white dark:bg-slate-800 px-4 py-2 rounded-lg border border-dashed border-primary">
+                                        {PIX_KEY}
+                                    </code>
+                                    <button onClick={() => navigator.clipboard.writeText(PIX_KEY.replace(/\D/g, ''))} className="p-2 text-slate-400 hover:text-primary">
+                                        <span className="material-symbols-outlined">content_copy</span>
+                                    </button>
+                                </div>
+                                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{PIX_NAME}</p>
+                            </div>
 
-                    <div className="pt-2 flex gap-3">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 transition-colors text-sm"
-                        >
-                            Cancelar
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className={`flex-1 px-4 py-2.5 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-sm ${isPaid ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'}`}
-                        >
-                            {loading ? (
-                                <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                            ) : (
-                                <span className="material-symbols-outlined text-base">{isPaid ? 'save' : 'check_circle'}</span>
-                            )}
-                            {isPaid ? 'Atualizar' : 'Confirmar Pagamento'}
-                        </button>
-                    </div>
-                </form>
+                            <button
+                                onClick={handleConfirmPayment}
+                                disabled={processing}
+                                className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/20 disabled:opacity-70 flex items-center justify-center gap-2"
+                            >
+                                {processing ? <span className="material-symbols-outlined animate-spin">refresh</span> : <span className="material-symbols-outlined">check_circle</span>}
+                                Confirmar Pagamento
+                            </button>
+                            <button onClick={() => setMode('menu')} className="mt-4 w-full py-2 text-slate-500 font-bold hover:text-slate-700">Voltar</button>
+                        </div>
+                    )}
+
+                    {mode === 'success' && (
+                        <div key="success" className="text-center py-10 animate-scale-in">
+                            <div className="size-20 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <span className="material-symbols-outlined text-4xl">hourglass_top</span>
+                            </div>
+                            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Pagamento em Análise</h3>
+                            <p className="text-slate-500">Aguardando confirmação do administrador.</p>
+                        </div>
+                    )}
+
+                </div>
             </div>
         </div>
     );

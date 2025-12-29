@@ -138,7 +138,7 @@ const UpcomingDosesTable: React.FC<UpcomingDosesTableProps> = ({ onViewPatient, 
                         <tr>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Paciente</th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Tratamento</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Horário</th>
+                            <th scope="col" className="px-6 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Data</th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
                             <th scope="col" className="px-6 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Ação</th>
                         </tr>
@@ -157,7 +157,10 @@ const UpcomingDosesTable: React.FC<UpcomingDosesTableProps> = ({ onViewPatient, 
                             doses.map((dose) => {
                                 const patient = dose.patients;
                                 if (!patient) return null;
-                                const time = new Date(dose.scheduled_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                                const dateObj = new Date(dose.scheduled_at);
+                                const day = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+                                const weekday = dateObj.toLocaleDateString('pt-BR', { weekday: 'short' });
+                                const dateString = weekday + ', ' + day;
                                 return (
                                     <tr key={dose.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                                         <td className="px-6 py-4 whitespace-nowrap">
@@ -181,8 +184,8 @@ const UpcomingDosesTable: React.FC<UpcomingDosesTableProps> = ({ onViewPatient, 
                                             <div className="text-sm text-slate-900 dark:text-white">{dose.treatment}</div>
                                             <div className="text-xs text-slate-500 dark:text-slate-400">{dose.dosage}</div>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="flex items-center text-sm text-slate-900 dark:text-white font-medium">{time}</div>
+                                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                                            <div className="flex items-center justify-center space-x-1 text-sm text-slate-900 dark:text-white font-medium"><span className="material-symbols-outlined text-base">calendar_today</span><span>{dateString}</span></div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(dose.status)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

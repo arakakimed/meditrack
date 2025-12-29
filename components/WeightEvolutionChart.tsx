@@ -68,46 +68,36 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, in
         return points.sort((a, b) => a.date.getTime() - b.date.getTime());
     }, [patient, injections]);
 
-    if (dataPoints.length < 2) {
-        return (
-            <div className="w-full h-64 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 flex items-center justify-center text-slate-400">
-                <div className="text-center">
-                    <span className="material-symbols-outlined text-4xl mb-2 opacity-50">show_chart</span>
-                    <p className="text-sm">Dados insuficientes para gerar o gráfico</p>
-                </div>
-            </div>
-        );
-    }
-
     // 2. Dimensions & Scales
-    // Mobile: narrower and taller (visually), simpler axis
-    // Desktop: wider and shorter
     const width = isMobile ? 350 : 800;
     const height = isMobile ? 250 : 300;
     const padding = isMobile
         ? { top: 30, right: 15, bottom: 30, left: 35 }
         : { top: 40, right: 30, bottom: 30, left: 40 };
 
-    const minWeight = Math.min(...dataPoints.map(p => p.weight), patient.targetWeight || 999) - 2;
-    const maxWeight = Math.max(...dataPoints.map(p => p.weight), patient.initialWeight || 0) + 2;
+    // Safety checks for empty data to prevent crashes before render
+    const safeWeights = dataPoints.length > 0 ? dataPoints.map(p => p.weight) : [0];
+    const minWeight = Math.min(...safeWeights, patient.targetWeight || 999) - 2;
+    const maxWeight = Math.max(...safeWeights, patient.initialWeight || 0) + 2;
     const weightRange = maxWeight - minWeight || 10;
 
-    const minDate = dataPoints[0].date.getTime();
-    const maxDate = dataPoints[dataPoints.length - 1].date.getTime();
+    const minDate = dataPoints.length > 0 ? dataPoints[0].date.getTime() : new Date().getTime();
+    const maxDate = dataPoints.length > 0 ? dataPoints[dataPoints.length - 1].date.getTime() : new Date().getTime();
     const dateRange = maxDate - minDate || 1;
 
-    const getX = (date: Date) => {
+    // Use useCallback for scale functions
+    const getX = React.useCallback((date: Date) => {
         const percent = (date.getTime() - minDate) / dateRange;
         return padding.left + percent * (width - padding.left - padding.right);
-    };
+    }, [minDate, dateRange, width, padding]);
 
-    const getY = (weight: number) => {
+    const getY = React.useCallback((weight: number) => {
         const percent = (weight - minWeight) / weightRange;
         return height - padding.bottom - percent * (height - padding.top - padding.bottom);
-    };
+    }, [minWeight, weightRange, height, padding]);
 
     // 3. Path Generation
-    const linePath = dataPoints.reduce((path, point, i, arr) => {
+    const linePath = dataPoints.reduce((path, point, i) => {
         const x = getX(point.date);
         const y = getY(point.weight);
         if (i === 0) return `M ${x},${y}`;
@@ -115,19 +105,17 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, in
     }, "");
 
     // Area Path
-    const areaPath = `
+    const areaPath = dataPoints.length > 0 ? `
         ${linePath}
         L ${getX(dataPoints[dataPoints.length - 1].date)},${height - padding.bottom}
         L ${getX(dataPoints[0].date)},${height - padding.bottom}
         Z
-    `;
+    ` : "";
 
     // 4. Target Line
     const targetY = patient.targetWeight ? getY(patient.targetWeight) : null;
 
     // 5. Trend Line (Linear Regression)
-    // y = mx + b
-    // x = timestamp, y = weight
     const trendPoints = React.useMemo(() => {
         if (dataPoints.length < 2) return null;
 
@@ -160,6 +148,19 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, in
             y2: getY(endY)
         };
     }, [dataPoints, minDate, maxDate, getX, getY]);
+
+    // Error State Render Logic (Moved to end)
+    if (dataPoints.length < 2) {
+        return (
+            <div className="w-full h-64 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 flex items-center justify-center text-slate-400">
+                <div className="text-center">
+                    <span className="material-symbols-outlined text-4xl mb-2 opacity-50">show_chart</span>
+                    <p className="text-sm">Dados insuficientes para gerar o gráfico</p>
+                </div>
+            </div>
+        );
+    }
+
 
     // Font sizes
     const fontSizeAxis = isMobile ? 10 : 10;

@@ -11,103 +11,9 @@ import GlobalRegisterDoseModal from './GlobalRegisterDoseModal';
 import DosePaymentModal from './DosePaymentModal';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 import MiniCalendar from './MiniCalendar';
+import { PatientFinancials } from './PatientFinancials';
 
-// Financial Balance Card Component
-const FinancialBalanceCard: React.FC<{
-    totalDosesValue: number;
-    totalPaid: number;
-    doseCount: number;
-    paidDoseCount: number;
-    onAddPayment: () => void;
-    onSettleDebt: () => void;
-}> = ({ totalDosesValue, totalPaid, doseCount, paidDoseCount, onAddPayment, onSettleDebt }) => {
 
-    // Balance = Payments - Doses Value
-    // Positive = Credit (patient paid in advance)
-    // Zero = Settled
-    // Negative = Debt (patient owes money)
-    const balance = totalPaid - totalDosesValue;
-
-    const getBalanceStatus = () => {
-        if (balance > 0) return 'credit';
-        if (balance === 0) return 'settled';
-        return 'debt';
-    };
-
-    const balanceStatus = getBalanceStatus();
-
-    const statusColors = {
-        credit: 'bg-emerald-50 border-emerald-300 text-emerald-700',
-        settled: 'bg-green-50 border-green-200 text-green-700',
-        debt: 'bg-red-50 border-red-200 text-red-700'
-    };
-
-    const statusLabels = {
-        credit: '💰 Saldo Disponível',
-        settled: '✓ Quitado',
-        debt: '⚠️ Em Débito'
-    };
-
-    const statusIcons = {
-        credit: 'savings',
-        settled: 'check_circle',
-        debt: 'warning'
-    };
-
-    const formatCurrency = (value: number) => {
-        return `R$ ${Math.abs(value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    };
-
-    return (
-        <div className="bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-            <div className="flex items-center gap-2 mb-4">
-                <span className="material-symbols-outlined text-emerald-500">account_balance_wallet</span>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Financeiro</h3>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4 mb-4">
-                <div className="text-center p-4 md:p-3 bg-blue-50 dark:bg-slate-800 rounded-lg">
-                    <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Total Doses</p>
-                    <p className="text-xl md:text-lg font-bold text-blue-600">{formatCurrency(totalDosesValue)}</p>
-                    <p className="text-xs md:text-[10px] text-slate-400">{doseCount} aplicações</p>
-                </div>
-                <div className="text-center p-4 md:p-3 bg-green-50 dark:bg-slate-800 rounded-lg">
-                    <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Pagamentos</p>
-                    <p className="text-xl md:text-lg font-bold text-green-600">{formatCurrency(totalPaid)}</p>
-                    <p className="text-xs md:text-[10px] text-slate-400">{paidDoseCount} doses pagas</p>
-                </div>
-                <div className={`text-center p-4 md:p-3 rounded-lg border-2 ${statusColors[balanceStatus]}`}>
-                    <p className="text-xs uppercase tracking-wider mb-1 opacity-70">Saldo</p>
-                    <div className="flex items-center justify-center gap-1">
-                        <span className="material-symbols-outlined text-lg">{statusIcons[balanceStatus]}</span>
-                        <p className="text-xl md:text-lg font-bold">
-                            {balanceStatus === 'debt' ? '-' : ''}{formatCurrency(balance)}
-                        </p>
-                    </div>
-                    <p className="text-[10px] font-medium">{statusLabels[balanceStatus]}</p>
-                </div>
-            </div>
-
-            <div className="flex gap-3">
-                <button
-                    onClick={onAddPayment}
-                    className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition-colors shadow-sm"
-                >
-                    <span className="material-symbols-outlined text-sm">add_card</span>
-                    <span className="text-sm">Adicionar Pagamento</span>
-                </button>
-                <button
-                    onClick={onSettleDebt}
-                    disabled={balance >= 0}
-                    className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-semibold transition-colors shadow-sm"
-                >
-                    <span className="material-symbols-outlined text-sm">payments</span>
-                    <span className="text-sm">Quitar Débitos</span>
-                </button>
-            </div>
-        </div>
-    );
-};
 
 
 const MedicationPath: React.FC<{
@@ -269,7 +175,7 @@ const MedicationPath: React.FC<{
 
                             {/* Weight Info Row */}
                             <div className="flex items-center gap-2">
-                                {weightInfo ? (
+                                {weightInfo && (
                                     <>
                                         {weightInfo.type === 'initial' && (
                                             <div className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md">
@@ -303,11 +209,6 @@ const MedicationPath: React.FC<{
                                             </div>
                                         )}
                                     </>
-                                ) : (
-                                    /* Fallback for steps without weight info (historical steps without log) */
-                                    <span className="text-[10px] font-medium text-slate-400 italic">
-                                        {step.details}
-                                    </span>
                                 )}
                             </div>
 
@@ -669,11 +570,11 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
 
             // Priority: 
             // 1. Latest Injection Weight
-            // 2. Patient Current Weight (from DB - potentially stale, but fallback)
-            // 3. Patient Initial Weight
+            // 2. Patient Initial Weight (If no history, current = initial)
+            // IGNORING patientData.current_weight from DB to prevent stale data
             const dynamicCurrentKey = latestInjectionWithWeight
                 ? latestInjectionWithWeight.patientWeightAtInjection
-                : (patientData?.current_weight || patientData?.initial_weight);
+                : patientData?.initial_weight;
 
             const initial = patientData?.initial_weight || 0;
             const current = dynamicCurrentKey || 0;
@@ -1039,14 +940,11 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                     <WeightEvolutionChart patient={realPatient} injections={injections} />
                 </div>
 
-                {/* Financial Balance Card */}
-                <FinancialBalanceCard
-                    totalDosesValue={totalDosesValue}
-                    totalPaid={totalPaidFromDoses + totalPaid}
-                    doseCount={doseCount}
-                    paidDoseCount={paidDoseCount}
-                    onAddPayment={() => alert('Em breve: Funcionalidade para adicionar pagamentos avulsos ou pacotes.')}
-                    onSettleDebt={() => alert('Em breve: Geração de PIX para quitação total dos débitos.')}
+                {/* Financial Section - New PatientFinancials */}
+                <PatientFinancials
+                    patient={realPatient}
+                    injections={injections}
+                    onUpdate={fetchData}
                 />
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
