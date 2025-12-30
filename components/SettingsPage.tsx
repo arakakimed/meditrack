@@ -43,143 +43,156 @@ interface UserManagementTableProps {
     onEdit: (user: User) => void;
 }
 
-const UserManagementTable: React.FC<UserManagementTableProps> = ({ users, onApprove, onReject, onDelete, onEdit }) => (
-    <>
-        {/* DESKTOP VIEW: Table */}
-        <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-                <thead>
-                    <tr className="border-b border-slate-100 dark:border-slate-700">
-                        <th className="text-left py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Usuário</th>
-                        <th className="text-left py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Perfil</th>
-                        <th className="text-left py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Status</th>
-                        <th className="text-right py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Ações</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                    {users.map((user) => (
-                        <tr key={user.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                            <td className="py-4 px-4">
-                                <div className="flex items-center gap-3">
-                                    {user.avatarUrl ? (
-                                        <img src={user.avatarUrl} alt={user.name} className="w-10 h-10 rounded-full object-cover ring-2 ring-white dark:ring-slate-800 shadow-sm" />
-                                    ) : (
-                                        <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-bold text-slate-600 dark:text-slate-300 ring-2 ring-white dark:ring-slate-800 shadow-sm">
-                                            {user.initials}
+const UserManagementTable: React.FC<UserManagementTableProps> = ({ users, onApprove, onReject, onDelete, onEdit }) => {
+    if (users.length === 0) {
+        return (
+            <div className="p-8 text-center text-slate-500 dark:text-slate-400">
+                <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <span className="material-symbols-outlined text-3xl">person_off</span>
+                </div>
+                <p>Nenhum usuário encontrado.</p>
+            </div>
+        );
+    }
+
+    return (
+        <>
+            {/* DESKTOP VIEW: Table */}
+            <div className="hidden md:block overflow-x-auto">
+                <table className="w-full">
+                    <thead>
+                        <tr className="border-b border-slate-100 dark:border-slate-700">
+                            <th className="text-left py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Usuário</th>
+                            <th className="text-left py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Perfil</th>
+                            <th className="text-left py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                            <th className="text-right py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {users.map((user) => (
+                            <tr key={user.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                <td className="py-4 px-4">
+                                    <div className="flex items-center gap-3">
+                                        {user.avatarUrl ? (
+                                            <img src={user.avatarUrl} alt={user.name} className="w-10 h-10 rounded-full object-cover ring-2 ring-white dark:ring-slate-800 shadow-sm" />
+                                        ) : (
+                                            <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-bold text-slate-600 dark:text-slate-300 ring-2 ring-white dark:ring-slate-800 shadow-sm">
+                                                {user.initials}
+                                            </div>
+                                        )}
+                                        <div>
+                                            <div className="font-bold text-slate-900 dark:text-white">{user.name}</div>
+                                            <div className="text-sm text-slate-500">{user.email}</div>
                                         </div>
-                                    )}
-                                    <div>
-                                        <div className="font-bold text-slate-900 dark:text-white">{user.name}</div>
-                                        <div className="text-sm text-slate-500">{user.email}</div>
                                     </div>
-                                </div>
-                            </td>
-                            <td className="py-4 px-4">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${user.role === 'Admin' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-300 dark:border-purple-800' :
+                                </td>
+                                <td className="py-4 px-4">
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${user.role === 'Admin' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-300 dark:border-purple-800' :
                                         user.role === 'Staff' ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800' :
                                             'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                                    }`}>
-                                    {user.role}
-                                </span>
-                            </td>
-                            <td className="py-4 px-4">
-                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${user.status === 'Active' ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800' :
+                                        }`}>
+                                        {user.role}
+                                    </span>
+                                </td>
+                                <td className="py-4 px-4">
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${user.status === 'Active' ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800' :
                                         user.status === 'Pending' ? 'bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-300 dark:border-yellow-800' :
                                             'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800'
-                                    }`}>
-                                    <span className={`w-1.5 h-1.5 rounded-full ${user.status === 'Active' ? 'bg-green-500' :
+                                        }`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${user.status === 'Active' ? 'bg-green-500' :
                                             user.status === 'Pending' ? 'bg-yellow-500' : 'bg-red-500'
-                                        }`}></span>
-                                    {user.status === 'Active' ? 'Ativo' : user.status === 'Pending' ? 'Pendente' : 'Inativo'}
-                                </span>
-                            </td>
-                            <td className="py-4 px-4 text-right">
-                                <div className="flex items-center justify-end gap-2">
-                                    {user.status === 'Pending' ? (
-                                        <>
-                                            <button onClick={() => onApprove(user.id, user)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Aprovar">
-                                                <span className="material-symbols-outlined text-xl">check_circle</span>
-                                            </button>
-                                            <button onClick={() => onReject(user.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Rejeitar">
-                                                <span className="material-symbols-outlined text-xl">cancel</span>
-                                            </button>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <button onClick={() => onEdit(user)} className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors" title="Editar">
-                                                <span className="material-symbols-outlined text-xl">edit_square</span>
-                                            </button>
-                                            <button onClick={() => onDelete(user.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
-                                                <span className="material-symbols-outlined text-xl">delete</span>
-                                            </button>
-                                        </>
-                                    )}
-                                </div>
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
+                                            }`}></span>
+                                        {user.status === 'Active' ? 'Ativo' : user.status === 'Pending' ? 'Pendente' : 'Inativo'}
+                                    </span>
+                                </td>
+                                <td className="py-4 px-4 text-right">
+                                    <div className="flex items-center justify-end gap-2">
+                                        {user.status === 'Pending' ? (
+                                            <>
+                                                <button onClick={() => onApprove(user.id, user)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Aprovar">
+                                                    <span className="material-symbols-outlined text-xl">check_circle</span>
+                                                </button>
+                                                <button onClick={() => onReject(user.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Rejeitar">
+                                                    <span className="material-symbols-outlined text-xl">cancel</span>
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <button onClick={() => onEdit(user)} className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors" title="Editar">
+                                                    <span className="material-symbols-outlined text-xl">edit_square</span>
+                                                </button>
+                                                <button onClick={() => onDelete(user.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
+                                                    <span className="material-symbols-outlined text-xl">delete</span>
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
 
-        {/* MOBILE VIEW: Aesthetic Slider/Cards */}
-        <div className="md:hidden flex flex-col gap-4">
-            {users.map((user) => (
-                <div key={user.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3 overflow-hidden">
-                        {user.avatarUrl ? (
-                            <img src={user.avatarUrl} alt={user.name} className="w-12 h-12 rounded-full object-cover ring-2 ring-white dark:ring-slate-800 shadow-sm flex-shrink-0" />
-                        ) : (
-                            <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-bold text-slate-600 dark:text-slate-300 ring-2 ring-white dark:ring-slate-800 shadow-sm flex-shrink-0">
-                                {user.initials}
-                            </div>
-                        )}
-                        <div className="min-w-0">
-                            <div className="font-bold text-slate-900 dark:text-white truncate">{user.name}</div>
-                            <div className="text-xs text-slate-500 truncate mb-1">{user.email}</div>
-                            <div className="flex gap-2">
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${user.role === 'Admin' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
+            {/* MOBILE VIEW: Aesthetic Slider/Cards */}
+            <div className="md:hidden flex flex-col gap-4">
+                {users.map((user) => (
+                    <div key={user.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 overflow-hidden">
+                            {user.avatarUrl ? (
+                                <img src={user.avatarUrl} alt={user.name} className="w-12 h-12 rounded-full object-cover ring-2 ring-white dark:ring-slate-800 shadow-sm flex-shrink-0" />
+                            ) : (
+                                <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-bold text-slate-600 dark:text-slate-300 ring-2 ring-white dark:ring-slate-800 shadow-sm flex-shrink-0">
+                                    {user.initials}
+                                </div>
+                            )}
+                            <div className="min-w-0">
+                                <div className="font-bold text-slate-900 dark:text-white truncate">{user.name}</div>
+                                <div className="text-xs text-slate-500 truncate mb-1">{user.email}</div>
+                                <div className="flex gap-2">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${user.role === 'Admin' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
                                         user.role === 'Staff' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
                                             'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                                    }`}>
-                                    {user.role}
-                                </span>
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${user.status === 'Active' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                                        }`}>
+                                        {user.role}
+                                    </span>
+                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${user.status === 'Active' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
                                         user.status === 'Pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
                                             'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                                    }`}>
-                                    {user.status === 'Active' ? 'Ativo' : user.status === 'Pending' ? 'Pendente' : 'Inativo'}
-                                </span>
+                                        }`}>
+                                        {user.status === 'Active' ? 'Ativo' : user.status === 'Pending' ? 'Pendente' : 'Inativo'}
+                                    </span>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <div className="flex flex-col gap-1">
-                        {user.status === 'Pending' ? (
-                            <>
-                                <button onClick={() => onApprove(user.id, user)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400">
-                                    <span className="material-symbols-outlined text-lg">check</span>
-                                </button>
-                                <button onClick={() => onReject(user.id)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400">
-                                    <span className="material-symbols-outlined text-lg">close</span>
-                                </button>
-                            </>
-                        ) : (
-                            <>
-                                <button onClick={() => onEdit(user)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-50 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
-                                    <span className="material-symbols-outlined text-lg">edit</span>
-                                </button>
-                                <button onClick={() => onDelete(user.id)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400">
-                                    <span className="material-symbols-outlined text-lg">delete</span>
-                                </button>
-                            </>
-                        )}
+                        <div className="flex flex-col gap-1">
+                            {user.status === 'Pending' ? (
+                                <>
+                                    <button onClick={() => onApprove(user.id, user)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400">
+                                        <span className="material-symbols-outlined text-lg">check</span>
+                                    </button>
+                                    <button onClick={() => onReject(user.id)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400">
+                                        <span className="material-symbols-outlined text-lg">close</span>
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <button onClick={() => onEdit(user)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-50 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                                        <span className="material-symbols-outlined text-lg">edit</span>
+                                    </button>
+                                    <button onClick={() => onDelete(user.id)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400">
+                                        <span className="material-symbols-outlined text-lg">delete</span>
+                                    </button>
+                                </>
+                            )}
+                        </div>
                     </div>
-                </div>
-            ))}
-        </div>
-    </>
-);
+                ))}
+            </div>
+        </>
+    );
+};
 
 
 const SettingsPage: React.FC = () => {
@@ -193,46 +206,73 @@ const SettingsPage: React.FC = () => {
 
     const [roleProfiles, setRoleProfiles] = useState<Profile[]>(mockProfiles);
     const [editingRole, setEditingRole] = useState<Profile | null>(null);
+
     const [isEditRoleModalOpen, setIsEditRoleModalOpen] = useState(false);
+    const [isPatientListModalOpen, setIsPatientListModalOpen] = useState(false);
 
     const fetchUsers = async () => {
         setLoading(true);
         try {
-            // Try fetching from 'profiles'
-            const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+            // 1. Fetch Profiles (App Users)
+            const { data: profilesData, error: profilesError } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
 
-            if (error) {
-                console.warn("Supabase profiles table missing or error, using localStorage fallback:", error);
+            // 2. Fetch Patients (Clinical Records)
+            const { data: patientsData, error: patientsError } = await supabase.from('patients').select('*').order('created_at', { ascending: false });
 
-                // FALLBACK: Load from LocalStorage
+            let mappedUsers: User[] = [];
+
+            // A. Process Profiles
+            if (profilesData) {
+                mappedUsers = profilesData.map((p: any) => ({
+                    id: p.id,
+                    name: p.name,
+                    email: p.email || '',
+                    role: p.role as UserRole,
+                    status: p.status as UserStatus,
+                    avatarUrl: p.avatar_url,
+                    initials: p.initials || p.name.substring(0, 2).toUpperCase()
+                }));
+            } else if (profilesError) {
+                console.warn("Supabase profiles fetch error:", profilesError);
+                // Fallback to local storage if needed (existing logic)
                 const localData = localStorage.getItem('meditrack_profiles');
-                if (localData) {
-                    setUsers(JSON.parse(localData));
-                } else {
-                    // Initialize with Mock data if nothing in local storage
-                    setUsers(mockUsers);
-                    localStorage.setItem('meditrack_profiles', JSON.stringify(mockUsers));
-                }
+                if (localData) mappedUsers = JSON.parse(localData);
+            }
+
+            // B. Process Patients & Merge
+            // We want to include patients who do NOT have a profile yet (Manual Adds)
+            // Strategy: Check if patient.user_id matches any profile.id. If not, add as "Pending User"
+            if (patientsData) {
+                const manualPatients = patientsData.filter(pt => {
+                    // Filter out patients whose user_id exists in profiles list
+                    // Actually, manual patients have user_id = Creator ID. They don't have their OWN ID in profiles.
+                    // So we can assume ALL manual patients (that don't share an ID with a profile) need to be listed.
+                    // But wait, if they registered, profile.id IS the auth ID. patient.user_id IS the auth ID.
+                    // So if patient.user_id exists in mappedUsers, they are already there.
+                    return !mappedUsers.some(u => u.id === pt.user_id);
+                });
+
+                const patientUsers: User[] = manualPatients.map(pt => ({
+                    id: pt.id, // Use patient ID for the list
+                    name: pt.name,
+                    email: '', // Manual patients don't have email in patients table usually
+                    role: 'Patient',
+                    status: 'Pending', // Pending App Access
+                    avatarUrl: pt.avatar_url,
+                    initials: pt.name.substring(0, 2).toUpperCase(),
+                    isManualPatient: true // Flag to identify source
+                }));
+
+                mappedUsers = [...mappedUsers, ...patientUsers];
+            }
+
+            if (mappedUsers.length === 0) {
+                setUsers(mockUsers);
             } else {
-                if (data && data.length > 0) {
-                    // Map backend fields to User interface
-                    const mappedUsers: User[] = data.map((p: any) => ({
-                        id: p.id,
-                        name: p.name,
-                        email: p.email || '',
-                        role: p.role as UserRole,
-                        status: p.status as UserStatus,
-                        avatarUrl: p.avatar_url,
-                        initials: p.initials || p.name.substring(0, 2).toUpperCase()
-                    }));
-                    setUsers(mappedUsers);
-                } else {
-                    setUsers(mockUsers);
-                }
+                setUsers(mappedUsers);
             }
         } catch (err) {
             console.error(err);
-            // FALLBACK
             const localData = localStorage.getItem('meditrack_profiles');
             setUsers(localData ? JSON.parse(localData) : mockUsers);
         } finally {
@@ -286,11 +326,24 @@ const SettingsPage: React.FC = () => {
     const confirmDelete = async () => {
         if (!userToDelete) return;
         setDeleteLoading(true);
+
+        const userObj = users.find(u => u.id === userToDelete);
+
         try {
             // Optimistic
             const updatedUsers = users.filter(u => u.id !== userToDelete);
 
-            const { error } = await supabase.from('profiles').delete().eq('id', userToDelete);
+            let error;
+            if (userObj?.isManualPatient) {
+                // Delete from patients table
+                const { error: dbError } = await supabase.from('patients').delete().eq('id', userToDelete);
+                error = dbError;
+            } else {
+                // Delete from profiles table
+                const { error: dbError } = await supabase.from('profiles').delete().eq('id', userToDelete);
+                error = dbError;
+            }
+
             if (error) {
                 console.warn("Supabase delete failed (using fallback):", error);
                 // Fallback to localStorage
@@ -372,7 +425,7 @@ const SettingsPage: React.FC = () => {
                         </div>
                     ) : (
                         <UserManagementTable
-                            users={users}
+                            users={users.filter(u => u.role !== 'Patient')}
                             onApprove={handleApprove}
                             onReject={handleReject}
                             onDelete={handleDeleteClick}
@@ -380,6 +433,61 @@ const SettingsPage: React.FC = () => {
                         />
                     )}
                 </div>
+            </section>
+
+            {/* App Eligible Patients Slider */}
+            <section className="space-y-4 pt-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <span className="material-symbols-outlined text-primary">phonelink_setup</span>
+                            Pacientes Aptos para App
+                        </h2>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                            Pacientes listados abaixo podem acessar o aplicativo. Para pacientes cadastrados manualmente, o acesso será liberado em breve.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => setIsPatientListModalOpen(true)}
+                        className="text-primary font-bold hover:bg-primary/5 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-sm"
+                    >
+                        Ver Lista Completa
+                        <span className="material-symbols-outlined text-lg">list_alt</span>
+                    </button>
+                </div>
+
+                {/* Patient List Modal */}
+                {isPatientListModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsPatientListModalOpen(false)}></div>
+                        <div className="relative bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-4xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+                            <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                                        <span className="material-symbols-outlined">group</span>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">Gerenciamento de Pacientes</h3>
+                                        <p className="text-xs text-slate-500">Lista completa de todos os pacientes registrados</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setIsPatientListModalOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                                    <span className="material-symbols-outlined">close</span>
+                                </button>
+                            </div>
+
+                            <div className="flex-1 overflow-auto p-0">
+                                <UserManagementTable
+                                    users={users.filter(u => u.role === 'Patient')}
+                                    onApprove={handleApprove}
+                                    onReject={handleReject}
+                                    onDelete={handleDeleteClick}
+                                    onEdit={handleEditUser}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
             </section>
 
             <ConfirmDeleteModal

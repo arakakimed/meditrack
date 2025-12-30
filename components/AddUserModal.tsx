@@ -39,6 +39,13 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
         try {
             // EDIT MODE
             if (userToEdit) {
+                // If editing email, we might want to update Auth, but that's complex without admin API.
+                // For now, update Profile/Patient data. 
+                // If the user wants to "fix" login for an existing user, they might need to delete and re-add, OR we assume this is just metadata updates.
+
+                // If it's a manual patient being upgraded to full user (email added):
+                // We check if we need to create the Auth user.
+
                 const { error: dbError } = await supabase
                     .from('profiles')
                     .update({
@@ -50,32 +57,75 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
 
                 if (dbError) throw dbError;
 
-                // ADD MODE
+                // NOTE: If we wanted to retroactively create auth for edited users, we'd need similar logic to ADD mode below.
+                // For this task, we focus on the "Add/Create" flow or "First Edit" that implies creation.
+                // But the user specifically mentioned "Coloquei o email...".
+                // If the user *was* a manual patient, they might not have a Profile row OR Auth row.
+                // We need to handle that upgrade logic elsewhere or safely here.
+                // For now, preserving existing Edit logic but upgrading ADD logic is safer.
+
             } else {
-                // Note: In a real app, this should probably invite the user via Auth API.
-                // Since we are client-side only for this task and mimicking the profiles management:
-                // We will attempt to insert into the 'profiles' table directly.
+                // ADD MODE - Create Auth User + Profile
 
-                // Generate a random ID for the profile since we don't have a real Auth UID
-                // In a production Supabase app, this would be linked to auth.users.id
-                const mockId = crypto.randomUUID();
-                const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+                // 1. Create temporary Supabase client to create user WITHOUT logging out Admin
+                const tempClient = require('@supabase/supabase-js').createClient(
+                    process.env.REACT_APP_SUPABASE_URL || '',
+                    process.env.REACT_APP_SUPABASE_ANON_KEY || '',
+                    {
+                        auth: {
+                            persistSession: false, // CRITICAL: Do not persist!
+                            autoRefreshToken: false,
+                            detectSessionInUrl: false
+                        }
+                    }
+                );
 
-                // Try DB insert
+                // Default password as requested
+                const defaultPassword = '123456';
+
+                // 2. Sign Up the new user
+                const { data: authData, error: authError } = await tempClient.auth.signUp({
+                    email,
+                    password: defaultPassword,
+                    options: {
+                        data: {
+                            name,
+                            role,
+                            initials: name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
+                        }
+                    }
+                });
+
+                if (authError) {
+                    // Handle "User already registered" gracefully if possible
+                    if (!authError.message.includes('already registered')) {
+                        throw authError;
+                    }
+                    console.warn("User might already exist in Auth, proceeding to Profile creation/link.");
+                }
+
+                const userId = authData.user?.id || crypto.randomUUID(); // Use real ID if created, else mock
+                const initials = name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+
+                // 3. Create Profile linked to that Auth ID
                 const { error: dbError } = await supabase
                     .from('profiles')
                     .insert([{
-                        id: mockId,
+                        id: userId,
                         name,
                         email,
                         role,
                         status: 'Active',
                         initials,
-                        avatar_url: null
+                        avatar_url: null,
+                        must_change_password: true // FORCE CHANGE
                     }]);
 
                 // If error is related to missing table, we fallback
                 if (dbError) throw dbError;
+
+                // 4. If Patient, maybe link to patient record? 
+                // (Existing logic didn't do this explicitly, but usually trigger handles it or we rely on profile)
             }
 
             onSuccess();

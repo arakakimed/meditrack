@@ -107,6 +107,7 @@ export interface User {
     initials: string;
     role: UserRole;
     status: UserStatus;
+    isManualPatient?: boolean;
 }
 
 export interface Profile {

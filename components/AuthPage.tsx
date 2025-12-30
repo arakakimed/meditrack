@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
 
+import UserRegistrationSuccessModal from './UserRegistrationSuccessModal';
+
 interface AuthPageProps {
     onAuthSuccess: () => void;
 }
@@ -12,6 +14,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [showChangePassword, setShowChangePassword] = useState(false);
+    const [tempUserId, setTempUserId] = useState<string | null>(null);
+    const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
 
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -20,11 +25,28 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
 
         try {
             if (isLogin) {
-                const { error } = await supabase.auth.signInWithPassword({
+                const { data, error } = await supabase.auth.signInWithPassword({
                     email,
                     password,
                 });
                 if (error) throw error;
+
+                // CHECK FOR FORCE PASSWORD CHANGE
+                if (data.user) {
+                    const { data: profile } = await supabase
+                        .from('profiles')
+                        .select('must_change_password')
+                        .eq('id', data.user.id)
+                        .single();
+
+                    if (profile?.must_change_password) {
+                        setTempUserId(data.user.id);
+                        setShowChangePassword(true);
+                        setLoading(false);
+                        return; // HALT HERE
+                    }
+                }
+
                 onAuthSuccess();
             } else {
                 if (password !== confirmPassword) {
@@ -49,18 +71,24 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                     }
                 });
                 if (error) throw error;
-                alert('Cadastro realizado! Se necessário, verifique seu e-mail para confirmar a conta.');
-                setIsLogin(true);
+                setIsSuccessModalOpen(true);
             }
         } catch (err: any) {
             setError(err.message);
         } finally {
-            setLoading(false);
+            if (!showChangePassword) setLoading(false);
         }
     };
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 font-sans">
+            <UserRegistrationSuccessModal
+                isOpen={isSuccessModalOpen}
+                onClose={() => {
+                    setIsSuccessModalOpen(false);
+                    setIsLogin(true); // Switch to login after success
+                }}
+            />
             <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-3xl shadow-xl overflow-hidden">
                 <div className="p-8">
                     <div className="text-center mb-8">
