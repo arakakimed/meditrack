@@ -35,6 +35,9 @@ const AddPatientModal: React.FC<AddPatientModalProps> = ({ isOpen, onClose, onSu
     const [showComorbidities, setShowComorbidities] = useState(false);
     const [showObservations, setShowObservations] = useState(false);
 
+    // Toast State
+    const [showSuccessToast, setShowSuccessToast] = useState(false);
+
     const [error, setError] = useState<string | null>(null);
 
     // Initial fill for edit mode
@@ -47,7 +50,7 @@ const AddPatientModal: React.FC<AddPatientModalProps> = ({ isOpen, onClose, onSu
             setWeight(patientToEdit.current_weight?.toString() || '');
             setInitialWeight(patientToEdit.initial_weight?.toString() || '');
             setTargetWeight(patientToEdit.target_weight?.toString() || '');
-            setHeight('170');
+            setHeight(patientToEdit.height?.toString() || '');
             setSelectedTags(patientToEdit.tags || []);
             setComorbidities(patientToEdit.comorbidities || []);
             setClinicalNotes(patientToEdit.clinical_notes || '');
@@ -193,7 +196,8 @@ const AddPatientModal: React.FC<AddPatientModalProps> = ({ isOpen, onClose, onSu
                 comorbidities: comorbidities,
                 clinical_notes: clinicalNotes,
                 initials: initialsStr,
-                user_id: user.id
+                user_id: user.id,
+                height: heightNum
             };
 
             if (patientToEdit?.id) {
@@ -209,12 +213,19 @@ const AddPatientModal: React.FC<AddPatientModalProps> = ({ isOpen, onClose, onSu
                 if (insertError) throw insertError;
             }
 
-            onSuccess();
-            onClose();
+            // Success Feedback - Toast
+            setShowSuccessToast(true);
+
+            // Wait a bit before closing to let user see the toast
+            setTimeout(() => {
+                onSuccess();
+                onClose();
+            }, 2000);
         } catch (err: any) {
             setError(err.message || 'Erro ao salvar paciente');
+            setLoading(false); // Stop loading on error
         } finally {
-            setLoading(false);
+            if (!showSuccessToast) setLoading(false); // Only stop loading here if NOT success (success keeps it loading until close)
         }
     };
 
@@ -601,6 +612,18 @@ const AddPatientModal: React.FC<AddPatientModalProps> = ({ isOpen, onClose, onSu
                         </button>
                     </div>
                 </form>
+
+                {/* Success Toast */}
+                {showSuccessToast && (
+                    <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300">
+                        <div className="bg-emerald-100 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl shadow-lg flex items-center gap-3">
+                            <div className="bg-emerald-500 rounded-full p-1 text-white">
+                                <span className="material-symbols-outlined text-sm font-bold">check</span>
+                            </div>
+                            <span className="font-bold text-sm">Dados do paciente salvos com sucesso!</span>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

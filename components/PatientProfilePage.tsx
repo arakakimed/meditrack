@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import WeightEvolutionChart from './WeightEvolutionChart';
-import { Patient, MedicationStep, Injection } from '../types';
+import { Patient, MedicationStep, Injection, CLINICAL_ZONES } from '../types';
 import { supabase } from '../lib/supabase';
 import EditMedicationStepModal from './EditMedicationStepModal';
 import AddPatientModal from './AddPatientModal';
@@ -650,25 +650,16 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
         const history: WeightDataPoint[] = [];
 
         // 1. Initial Weight
-        if (realPatient.initialWeight) {
-            // Estimate date if not available (e.g. 1 month prior to first injection or today)
-            // But let's try to be smart. If there are no injections, use created_at of patient (not available here yet).
-            // For now, let's skip "Artificial" initial points here and let the chart handle it or add if needed.
-            // Actually, best to add it here if we want consistency.
-            // Let's rely on the Chart's internal logic for "Initial" if it detects it, 
-            // OR we map it here. The previous chart logic had safe fallbacks.
-            // Let's pass explicit points we KNOW.
+        // (Handled by chart internal logic relative to patient prop, or implicit)
 
-            // Note: The previous chart logic extracted 'initial' from patient prop.
-            // We should keep passing 'patient' prop to chart, so it can handle "Initial" line.
-            // But for the POINTS array:
-        }
+        // 2. Collect ALL weights first
+        const rawPoints: WeightDataPoint[] = [];
 
-        // 1. Injection Weights
+        // From Injections
         injections.forEach(inj => {
             if (inj.patientWeightAtInjection) {
-                history.push({
-                    date: new Date(inj.applicationDate), // YYYY-MM-DD string to Date
+                rawPoints.push({
+                    date: new Date(inj.applicationDate), // YYYY-MM-DD
                     weight: inj.patientWeightAtInjection,
                     source: 'injection',
                     label: inj.date
@@ -676,13 +667,12 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
             }
         });
 
-        // 2. Manual Weights
+        // From Manual
         manualWeights.forEach(mw => {
-            // mw.date is YYYY-MM-DD string
             const [y, m, d] = mw.date.split('-').map(Number);
             const dateObj = new Date(y, m - 1, d, 12, 0, 0);
 
-            history.push({
+            rawPoints.push({
                 id: mw.id,
                 date: dateObj,
                 weight: mw.weight,
@@ -691,8 +681,114 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
             });
         });
 
-        return history;
+        // 3. Deduplicate / Prioritize per Day
+        // Map: 'YYYY-MM-DD' -> WeightDataPoint
+        const dayMap = new Map<string, WeightDataPoint>();
+
+        rawPoints.forEach(point => {
+            const dateKey = point.date.toISOString().split('T')[0];
+            const existing = dayMap.get(dateKey);
+
+            if (!existing) {
+                dayMap.set(dateKey, point);
+            } else {
+                // Conflict resolution: Manual > Injection
+                if (point.source === 'manual') {
+                    // Always overwrite with manual
+                    dayMap.set(dateKey, point);
+                } else if (point.source === 'injection') {
+                    // Only overwrite if existing is NOT manual (i.e., if existing is another injection?? or initial)
+                    if (existing.source !== 'manual') {
+                        dayMap.set(dateKey, point);
+                    }
+                }
+            }
+        });
+
+        return Array.from(dayMap.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
     }, [injections, manualWeights, realPatient.initialWeight]);
+
+    // Derived Display Values (Sync with Chart)
+    const { displayCurrentWeight, displayWeightChange, displayTotalLost, displayBMI, displayProgressPercent, isSuperResponder } = useMemo(() => {
+        if (weightHistory.length === 0) {
+            return {
+                displayCurrentWeight: realPatient.currentWeight || 0,
+                displayWeightChange: realPatient.weightChange || 0,
+                displayTotalLost: 0,
+                displayBMI: realPatient.bmi || 0,
+                displayProgressPercent: 0,
+                isSuperResponder: false
+            };
+        }
+
+        const latestPoint = weightHistory[weightHistory.length - 1]; // Sorted ASC, so last is newest
+        const current = latestPoint.weight;
+        const initial = realPatient.initialWeight || current;
+        const target = realPatient.targetWeight || 0;
+
+        const change = current - initial;
+        const totalLost = initial - current;
+
+        // Calculate BMI
+        const heightM = (realPatient.height || 0) / 100; // cm to m
+        const bmi = heightM > 0 ? parseFloat((current / (heightM * heightM)).toFixed(1)) : 0;
+
+        // Calculate Progress %
+        let progress = 0;
+        if (target && initial) {
+            const totalToLose = initial - target;
+            const lostSoFar = initial - current;
+            if (totalToLose > 0) {
+                progress = Math.min(100, Math.max(0, (lostSoFar / totalToLose) * 100));
+            }
+        }
+
+        // Check Super Responder Status
+        let isSuperResponder = false;
+        if (latestPoint && initial) {
+            const startDate = weightHistory[0].date.getTime();
+            const daysActive = (latestPoint.date.getTime() - startDate) / (1000 * 60 * 60 * 24);
+            const currentWeek = daysActive / 7;
+
+            const gender = realPatient.gender === 'Male' ? 'Male' : 'Female';
+            const zones = CLINICAL_ZONES[gender];
+
+            let maxLossPercent = 0;
+            if (currentWeek > 0) {
+                // Simple linear interpolation for limit
+                let w1 = zones[0];
+                let w2 = zones[zones.length - 1];
+
+                for (let i = 0; i < zones.length - 1; i++) {
+                    if (currentWeek >= zones[i].week && currentWeek <= zones[i + 1].week) {
+                        w1 = zones[i];
+                        w2 = zones[i + 1];
+                        break;
+                    }
+                }
+
+                const weekRange = w2.week - w1.week;
+                const progressInBracket = (currentWeek - w1.week) / (weekRange || 1);
+                maxLossPercent = w1.maxLoss + (w2.maxLoss - w1.maxLoss) * progressInBracket;
+
+                // Cap at week 16 max loss if beyond
+                if (currentWeek > 16) maxLossPercent = zones[zones.length - 1].maxLoss;
+
+                const expectedWeight = initial * (1 - (maxLossPercent / 100));
+                if (current < expectedWeight) isSuperResponder = true;
+            }
+        }
+
+        return {
+            displayCurrentWeight: current,
+            displayWeightChange: change, // Negative means lost
+            displayTotalLost: totalLost > 0 ? totalLost : 0, // Positive value for "kg elim."
+            displayBMI: bmi,
+            displayProgressPercent: progress,
+            isSuperResponder
+        };
+    }, [weightHistory, realPatient.initialWeight, realPatient.currentWeight, realPatient.targetWeight, realPatient.height, realPatient.bmi, realPatient.weightChange]);
+
 
     // Build Journey Steps Dynamically from History + Plan
     const journeySteps: MedicationStep[] = useMemo(() => {
@@ -788,6 +884,88 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
         setIsConfirmDeleteModalOpen(true);
     };
 
+    // Helper to recalculate weight based on all history
+    const recalculateAndSavePatientWeight = async (patientId: string) => {
+        try {
+            // 1. Fetch Manual Weights (include created_at for tie-breaking)
+            const { data: manualData } = await supabase
+                .from('weight_measurements')
+                .select('weight, date, created_at')
+                .eq('patient_id', patientId);
+
+            // 2. Fetch Injection Weights
+            const { data: injectionData } = await supabase
+                .from('injections')
+                .select('patient_weight_at_injection, application_date, created_at')
+                .eq('patient_id', patientId)
+                .not('patient_weight_at_injection', 'is', null);
+
+            // 3. Merge and Sort descending by DATE, then by CREATED_AT
+            const allWeights = [
+                ...(manualData || []).map(m => ({
+                    weight: m.weight,
+                    date: m.date,
+                    created_at: m.created_at
+                })),
+                ...(injectionData || []).map(i => ({
+                    weight: i.patient_weight_at_injection,
+                    date: i.application_date || i.created_at, // Accessing date field
+                    created_at: i.created_at
+                }))
+            ].sort((a, b) => {
+                const dateA = new Date(a.date).getTime();
+                const dateB = new Date(b.date).getTime();
+                if (dateA !== dateB) {
+                    return dateB - dateA; // Descending Date
+                }
+                // If same date, prefer newer record (Created At)
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            });
+
+            // 4. Determine New Current Weight
+            if (allWeights.length > 0) {
+                const latest = allWeights[0];
+                const newCurrent = latest.weight;
+                const newChange = newCurrent - (realPatient.initialWeight || newCurrent);
+
+                // 5. Update Patient Table
+                const { error } = await supabase
+                    .from('patients')
+                    .update({
+                        current_weight: newCurrent,
+                        weight_change: newChange
+                    })
+                    .eq('id', patientId);
+
+                if (!error) {
+                    // Update local state immediately to reflect change
+                    setRealPatient(prev => ({
+                        ...prev,
+                        currentWeight: newCurrent,
+                        weightChange: newChange
+                    }));
+                }
+
+            } else {
+                if (realPatient.initialWeight) {
+                    await supabase.from('patients').update({
+                        current_weight: realPatient.initialWeight,
+                        weight_change: 0
+                    }).eq('id', patientId);
+
+                    setRealPatient(prev => ({
+                        ...prev,
+                        currentWeight: prev.initialWeight || 0,
+                        weightChange: 0
+                    }));
+                }
+            }
+
+        } catch (err) {
+            console.error("Error recalculating weight:", err);
+        }
+    };
+
     const confirmDelete = async () => {
         if (!injectionToDelete) return;
 
@@ -795,6 +973,9 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
         try {
             const { error } = await supabase.from('injections').delete().eq('id', injectionToDelete.id);
             if (error) throw error;
+
+            // Recalculate weight
+            await recalculateAndSavePatientWeight(patient.id);
 
             setIsConfirmDeleteModalOpen(false);
             setInjectionToDelete(null);
@@ -902,12 +1083,12 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                         </div>
                         <p className="text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 md:mb-2">Peso Atual</p>
                         <div className="flex items-baseline gap-1">
-                            <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{realPatient.currentWeight}</span>
+                            <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{displayCurrentWeight}</span>
                             <span className="text-sm font-medium text-slate-500">kg</span>
                         </div>
-                        <div className={`text-xs font-medium mt-2 flex items-center gap-1 ${realPatient.weightChange <= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                            <span className="material-symbols-outlined text-base">{realPatient.weightChange <= 0 ? 'trending_down' : 'trending_up'}</span>
-                            <span>{Math.abs(realPatient.weightChange)} kg {realPatient.weightChange <= 0 ? 'perdidos' : 'ganhos'}</span>
+                        <div className={`text-xs font-medium mt-2 flex items-center gap-1 ${displayWeightChange <= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                            <span className="material-symbols-outlined text-base">{displayWeightChange <= 0 ? 'trending_down' : 'trending_up'}</span>
+                            <span>{Math.abs(Number(displayWeightChange.toFixed(1)))} kg {displayWeightChange <= 0 ? 'perdidos' : 'ganhos'}</span>
                         </div>
                     </div>
 
@@ -921,10 +1102,10 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                             <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{realPatient.targetWeight || '--'}</span>
                             <span className="text-sm font-medium text-slate-500">kg</span>
                         </div>
-                        {realPatient.targetWeight && realPatient.currentWeight && (
+                        {realPatient.targetWeight && displayCurrentWeight && (
                             <div className="text-xs font-medium mt-2 text-purple-600 dark:text-purple-400 flex items-center gap-1">
                                 <span className="material-symbols-outlined text-base">distance</span>
-                                <span>Faltam {(realPatient.currentWeight - realPatient.targetWeight).toFixed(1)} kg</span>
+                                <span>Faltam {(displayCurrentWeight - realPatient.targetWeight).toFixed(1)} kg</span>
                             </div>
                         )}
                         {!realPatient.targetWeight && (
@@ -941,7 +1122,7 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                         </div>
                         <p className="text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 md:mb-2">IMC</p>
                         <div className="flex items-baseline gap-1">
-                            <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{realPatient.bmi}</span>
+                            <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{displayBMI}</span>
                         </div>
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-2 ${realPatient.bmiCategory === 'Normal' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' :
                             realPatient.bmiCategory === 'Overweight' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' :
@@ -955,38 +1136,43 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                     </div>
 
                     {/* Progress Card (Initial vs Current) */}
-                    <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl p-4 shadow-lg text-white relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-4 opacity-20 group-hover:opacity-30 transition-opacity">
-                            <span className="material-symbols-outlined text-4xl text-white">analytics</span>
+                    <div className="bg-blue-600 rounded-2xl p-4 shadow-lg shadow-blue-500/30 text-white relative overflow-hidden group hover:shadow-xl transition-all">
+                        {/* Background Decoration */}
+                        <div className="absolute top-0 right-0 p-4 opacity-20">
+                            <span className="material-symbols-outlined text-6xl">leaderboard</span>
                         </div>
-                        <p className="text-[10px] md:text-xs font-medium text-blue-100 uppercase tracking-wider mb-1 md:mb-2">Progresso Total</p>
-                        <div className="flex items-baseline gap-1">
-                            <span className="text-2xl md:text-3xl font-bold text-white">
-                                {realPatient.initialWeight && realPatient.currentWeight
-                                    ? (realPatient.initialWeight - realPatient.currentWeight).toFixed(1)
-                                    : '0.0'}
-                            </span>
+
+                        {/* Super Responder Badge Logic */}
+                        {isSuperResponder && (
+                            <div className="absolute top-3 right-3 bg-gradient-to-r from-amber-300 to-orange-400 text-amber-900 border border-amber-200 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm flex items-center gap-1 animate-in fade-in zoom-in duration-500">
+                                <span className="material-symbols-outlined text-sm font-bold">bolt</span>
+                                <span>Super Responder</span>
+                            </div>
+                        )}
+
+                        <div className="flex justify-between items-center mb-1 md:mb-2 relative z-10">
+                            <p className="text-[10px] md:text-xs font-medium text-blue-100 uppercase tracking-wider">Progresso Total</p>
+                        </div>
+
+                        <div className="flex items-baseline gap-1 relative z-10">
+                            <span className="text-3xl md:text-4xl font-black">{Number(displayTotalLost).toFixed(1)}</span>
                             <span className="text-sm font-medium text-blue-100">kg elim.</span>
                         </div>
                         <div className="mt-3 w-full bg-black/20 rounded-full h-1.5 overflow-hidden">
                             <div
                                 className="bg-white/90 h-full rounded-full transition-all duration-1000"
                                 style={{
-                                    width: `${realPatient.targetWeight && realPatient.initialWeight
-                                        ? Math.min(100, Math.max(0, ((realPatient.initialWeight - realPatient.currentWeight) / (realPatient.initialWeight - realPatient.targetWeight)) * 100))
-                                        : 0}%`
+                                    width: `${displayProgressPercent}%`
                                 }}
                             ></div>
                         </div>
                         <div className="flex justify-between mt-1">
                             <span className="text-[10px] text-blue-200">Início: {realPatient.initialWeight}kg</span>
-                            <span className="text-[10px] text-blue-200">Meta: {realPatient.targetWeight || '?'}kg</span>
+                            <span className="text-sm text-blue-200">Meta: {realPatient.targetWeight || '?'}kg</span>
                         </div>
                     </div>
                 </div>
 
-                {/* Weight Evolution Chart */}
-                {/* Weight Evolution Chart */}
                 <div className="mb-8 animate-in slide-in-from-bottom-2 duration-500 delay-100 group relative">
                     <WeightEvolutionChart
                         patient={realPatient}
@@ -996,17 +1182,16 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                                 setWeightToDelete({ id: point.id, weight: point.weight, date: point.date });
                             }
                         }}
+                        action={
+                            <button
+                                onClick={() => setIsAddWeightModalOpen(true)}
+                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 shadow-md border border-blue-500 rounded-xl text-xs md:text-sm font-bold text-white hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 hover:shadow-lg"
+                            >
+                                <span className="material-symbols-outlined text-lg">add_circle</span>
+                                Registrar Peso
+                            </button>
+                        }
                     />
-                    {/* Floating "Add Weight" Button for Chart Area */}
-                    <div className="absolute top-4 right-4 md:right-6">
-                        <button
-                            onClick={() => setIsAddWeightModalOpen(true)}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 shadow-md border border-blue-500 rounded-xl text-xs md:text-sm font-bold text-white hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 hover:shadow-lg"
-                        >
-                            <span className="material-symbols-outlined text-lg">add_circle</span>
-                            Registrar Peso
-                        </button>
-                    </div>
                 </div>
 
                 {/* Weight Deletion Confirmation Modal */}
@@ -1023,6 +1208,9 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                                     .eq('id', weightToDelete.id);
 
                                 if (error) throw error;
+
+                                // RECALCULATE WEIGHT
+                                await recalculateAndSavePatientWeight(patient.id);
 
                                 setWeightToDelete(null);
                                 fetchData(); // Refresh data
@@ -1170,7 +1358,8 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
             <AddWeightModal
                 isOpen={isAddWeightModalOpen}
                 onClose={() => setIsAddWeightModalOpen(false)}
-                onSuccess={() => {
+                onSuccess={async () => {
+                    await recalculateAndSavePatientWeight(patient.id);
                     fetchData(); // Refresh measurements
                 }}
                 patientId={patient.id}

@@ -213,66 +213,79 @@ const SettingsPage: React.FC = () => {
     const fetchUsers = async () => {
         setLoading(true);
         try {
-            // 1. Fetch Profiles (App Users)
-            const { data: profilesData, error: profilesError } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+            // 1. Load LocalStorage (The Cache / Source of Truth for Offline)
+            const localData = localStorage.getItem('meditrack_profiles');
+            let localUsers: User[] = localData ? JSON.parse(localData) : [];
 
-            // 2. Fetch Patients (Clinical Records)
-            const { data: patientsData, error: patientsError } = await supabase.from('patients').select('*').order('created_at', { ascending: false });
+            // Map for easy merging (ID -> User)
+            const userMap = new Map<string, User>();
 
-            let mappedUsers: User[] = [];
+            // Populate map with local users first
+            localUsers.forEach(u => userMap.set(u.id, u));
 
-            // A. Process Profiles
-            if (profilesData) {
-                mappedUsers = profilesData.map((p: any) => ({
-                    id: p.id,
-                    name: p.name,
-                    email: p.email || '',
-                    role: p.role as UserRole,
-                    status: p.status as UserStatus,
-                    avatarUrl: p.avatar_url,
-                    initials: p.initials || p.name.substring(0, 2).toUpperCase()
-                }));
-            } else if (profilesError) {
-                console.warn("Supabase profiles fetch error:", profilesError);
-                // Fallback to local storage if needed (existing logic)
-                const localData = localStorage.getItem('meditrack_profiles');
-                if (localData) mappedUsers = JSON.parse(localData);
+            // 2. Attempt Fetch from Supabase (Profiles)
+            try {
+                const { data: profilesData, error: profilesError } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+
+                if (profilesData) {
+                    profilesData.forEach((p: any) => {
+                        userMap.set(p.id, {
+                            id: p.id,
+                            name: p.name,
+                            email: p.email || '',
+                            role: p.role as UserRole,
+                            status: p.status as UserStatus,
+                            avatarUrl: p.avatar_url,
+                            initials: p.initials || p.name.substring(0, 2).toUpperCase()
+                        });
+                    });
+                }
+            } catch (dbErr) {
+                console.warn("Supabase profiles silent fail:", dbErr);
             }
 
-            // B. Process Patients & Merge
-            // We want to include patients who do NOT have a profile yet (Manual Adds)
-            // Strategy: Check if patient.user_id matches any profile.id. If not, add as "Pending User"
-            if (patientsData) {
-                const manualPatients = patientsData.filter(pt => {
-                    // Filter out patients whose user_id exists in profiles list
-                    // Actually, manual patients have user_id = Creator ID. They don't have their OWN ID in profiles.
-                    // So we can assume ALL manual patients (that don't share an ID with a profile) need to be listed.
-                    // But wait, if they registered, profile.id IS the auth ID. patient.user_id IS the auth ID.
-                    // So if patient.user_id exists in mappedUsers, they are already there.
-                    return !mappedUsers.some(u => u.id === pt.user_id);
-                });
+            // 3. Attempt Fetch Manual Patients (Pending Users)
+            try {
+                const { data: patientsData } = await supabase.from('patients').select('*').order('created_at', { ascending: false });
 
-                const patientUsers: User[] = manualPatients.map(pt => ({
-                    id: pt.id, // Use patient ID for the list
-                    name: pt.name,
-                    email: '', // Manual patients don't have email in patients table usually
-                    role: 'Patient',
-                    status: 'Pending', // Pending App Access
-                    avatarUrl: pt.avatar_url,
-                    initials: pt.name.substring(0, 2).toUpperCase(),
-                    isManualPatient: true // Flag to identify source
-                }));
-
-                mappedUsers = [...mappedUsers, ...patientUsers];
+                if (patientsData) {
+                    patientsData.forEach((pt: any) => {
+                        // Only add if not already a profile (check by user_id or id)
+                        // Note: Manual patients don't have user_id pointing to a profile usually, or it points to creator.
+                        // We filter out those who are definitely already profiles.
+                        if (!userMap.has(pt.user_id)) {
+                            // Use patient ID as key for the list
+                            userMap.set(pt.id, {
+                                id: pt.id,
+                                name: pt.name,
+                                email: '',
+                                role: 'Patient',
+                                status: 'Pending',
+                                avatarUrl: pt.avatar_url,
+                                initials: pt.name.substring(0, 2).toUpperCase(),
+                                isManualPatient: true
+                            });
+                        }
+                    });
+                }
+            } catch (patErr) {
+                console.warn("Supabase patients silent fail:", patErr);
             }
 
-            if (mappedUsers.length === 0) {
+            // 4. Convert Map back to Array & Sort
+            const mergedUsers = Array.from(userMap.values());
+
+            // Optional: Sort by name or role if needed, or rely on insert order
+            // Let's keep mocks if completely empty
+            if (mergedUsers.length === 0) {
                 setUsers(mockUsers);
             } else {
-                setUsers(mappedUsers);
+                setUsers(mergedUsers); // No mockUsers fallback if cache exists but is empty? Maybe better to keep it empty if user wiped it.
             }
+
         } catch (err) {
             console.error(err);
+            // Final fallback
             const localData = localStorage.getItem('meditrack_profiles');
             setUsers(localData ? JSON.parse(localData) : mockUsers);
         } finally {
@@ -502,7 +515,20 @@ const SettingsPage: React.FC = () => {
             <AddUserModal
                 isOpen={isAddUserModalOpen}
                 onClose={() => { setIsAddUserModalOpen(false); setEditingUser(null); }}
-                onSuccess={fetchUsers}
+                onSuccess={(updatedUser) => {
+                    // Optimistic update
+                    if (updatedUser) {
+                        setUsers(prev => {
+                            const exists = prev.find(p => p.id === updatedUser.id);
+                            if (exists) {
+                                return prev.map(p => p.id === updatedUser.id ? { ...p, ...updatedUser } : p);
+                            }
+                            return [updatedUser, ...prev];
+                        });
+                    }
+
+                    fetchUsers(); // Background refresh
+                }}
                 userToEdit={editingUser}
             />
 

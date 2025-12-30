@@ -3,6 +3,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import type { View } from '../App';
 import { supabase } from '../lib/supabase';
 import MessagingModal from './MessagingModal';
+import AddUserModal from './AddUserModal';
+import { User } from '../types';
 
 interface Notification {
     id: string;
@@ -310,9 +312,9 @@ const NotificationDropdown: React.FC<{
                                 <div className="flex gap-3">
                                     <div className={`mt-1 flex-shrink-0 w-2 h-2 rounded-full ${!notification.read ? 'bg-primary' : 'bg-transparent'}`}></div>
                                     <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${notification.type === 'alert' ? 'bg-red-100 text-red-600' :
-                                            notification.type === 'schedule' ? 'bg-purple-100 text-purple-600' :
-                                                notification.type === 'dose' ? 'bg-green-100 text-green-600' :
-                                                    'bg-blue-100 text-blue-600'
+                                        notification.type === 'schedule' ? 'bg-purple-100 text-purple-600' :
+                                            notification.type === 'dose' ? 'bg-green-100 text-green-600' :
+                                                'bg-blue-100 text-blue-600'
                                         }`}>
                                         <span className="material-symbols-outlined text-sm">
                                             {notification.type === 'alert' ? 'warning' :
@@ -373,7 +375,15 @@ const NotificationButton: React.FC = () => {
     );
 };
 
-const DashboardHeader: React.FC<{ view: View, setView: (view: View) => void, onOpenGlobalDose: () => void, onViewPatient?: (patientId: string) => void, onOpenMessaging: () => void }> = ({ view, setView, onOpenGlobalDose, onViewPatient, onOpenMessaging }) => (
+const DashboardHeader: React.FC<{
+    view: View,
+    setView: (view: View) => void,
+    onOpenGlobalDose: () => void,
+    onViewPatient?: (patientId: string) => void,
+    onOpenMessaging: () => void,
+    currentUser: User | null,
+    onProfileClick: () => void
+}> = ({ view, setView, onOpenGlobalDose, onViewPatient, onOpenMessaging, currentUser, onProfileClick }) => (
     <header className="sticky top-0 z-50 bg-white/80 dark:bg-[#0f1723]/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">
@@ -409,7 +419,12 @@ const DashboardHeader: React.FC<{ view: View, setView: (view: View) => void, onO
                         <span className="material-symbols-outlined">settings</span>
                     </button>
                     <div className="flex items-center gap-2">
-                        <div className="h-9 w-9 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden ring-2 ring-white dark:ring-slate-800 cursor-pointer bg-cover bg-center" style={{ backgroundImage: "url('https://lh3.googleusercontent.com/aida-public/AB6AXuCBjkgvInMz37mw8dT1u6lWFYCKQusa46cpXGNMgvMjOvHHeOKsAkIPhVn7QWyDUsmCjlJqWMM5Dan6hj-WB5-UsB-nSUk55yQdHuI55XKDq_wBHpiUFOEkJ0r3e-7F0KIItgsH-145evCGSIixYGGlGIuXnkuwdQdVG6sL8MJ0o-F74jTzn_VBqX6RbJSGUzyMBWh5gOl41XjqUp1bP6yAnocUsQbNXTwRnuRVRQGrjAXwvwMubCvaFtA9h1c6NZ-TBQ17By7H_Fw')" }}>
+                        <div
+                            className="h-9 w-9 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden ring-2 ring-white dark:ring-slate-800 cursor-pointer bg-cover bg-center transition-transform hover:scale-110 active:scale-95"
+                            style={{ backgroundImage: `url('${currentUser?.avatarUrl || "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"}')` }}
+                            onClick={onProfileClick}
+                        >
+                            {!currentUser?.avatarUrl && <span className="flex w-full h-full items-center justify-center text-xs font-bold">{currentUser?.initials || 'U'}</span>}
                         </div>
                         <button
                             onClick={() => supabase.auth.signOut()}
@@ -491,6 +506,87 @@ const Layout: React.FC<LayoutProps> = ({ view, setView, onOpenGlobalDose, childr
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isMessagingOpen, setIsMessagingOpen] = useState(false);
 
+    // User Profile State
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+
+    const fetchCurrentUser = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                let profileData = null;
+
+                // 1. Try Fetching from DB
+                try {
+                    const { data, error } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', user.id)
+                        .single();
+
+                    if (!error && data) {
+                        profileData = data;
+                    }
+                } catch (dbErr) {
+                    console.warn("DB Profile fetch failed, trying local storage", dbErr);
+                }
+
+                // 2. Fallback to LocalStorage if DB failed or returned null
+                if (!profileData) {
+                    const stored = localStorage.getItem('meditrack_profiles');
+                    if (stored) {
+                        try {
+                            const profiles = JSON.parse(stored);
+                            // Try matching by ID first
+                            profileData = profiles.find((p: any) => p.id === user.id);
+
+                            // If not found by ID, try Email (common in fallback scenarios with random IDs)
+                            if (!profileData && user.email) {
+                                profileData = profiles.find((p: any) => p.email?.toLowerCase() === user.email?.toLowerCase());
+                            }
+                        } catch (parseErr) {
+                            console.error("Error parsing local profiles", parseErr);
+                        }
+                    }
+                }
+
+                // 3. Set User State
+                if (profileData) {
+                    setCurrentUser({
+                        id: profileData.id, // Use profile ID (or user.id if strict)
+                        name: profileData.name,
+                        email: profileData.email || user.email!,
+                        role: profileData.role,
+                        status: profileData.status || 'Active',
+                        avatarUrl: profileData.avatar_url || profileData.avatarUrl, // Support both snake_case and camelCase
+                        initials: profileData.initials || (profileData.name ? profileData.name.substring(0, 2).toUpperCase() : 'U')
+                    });
+                } else {
+                    // Minimal Fallback from Auth Metadata
+                    setCurrentUser({
+                        id: user.id,
+                        name: user.user_metadata?.name || 'Usuário',
+                        email: user.email!,
+                        role: 'Staff',
+                        status: 'Active',
+                        avatarUrl: user.user_metadata?.avatar_url || null,
+                        initials: user.user_metadata?.name ? user.user_metadata.name.substring(0, 2).toUpperCase() : 'U'
+                    });
+                }
+            }
+        } catch (err) {
+            console.error("Error fetching current user", err);
+        }
+    };
+
+    useEffect(() => {
+        fetchCurrentUser();
+    }, []);
+
+    const handleProfileClick = () => {
+        setIsProfileModalOpen(true);
+    };
+
     // PATIENT VIEW: Simplified Layout
     if (userRole === 'Patient') {
         return (
@@ -507,8 +603,26 @@ const Layout: React.FC<LayoutProps> = ({ view, setView, onOpenGlobalDose, childr
     if (isDashboard) {
         return (
             <div className="text-slate-900 dark:text-white min-h-screen flex flex-col font-display">
-                <DashboardHeader view={view} setView={setView} onOpenGlobalDose={onOpenGlobalDose} onViewPatient={onViewPatient} onOpenMessaging={() => setIsMessagingOpen(true)} />
+                <DashboardHeader
+                    view={view}
+                    setView={setView}
+                    onOpenGlobalDose={onOpenGlobalDose}
+                    onViewPatient={onViewPatient}
+                    onOpenMessaging={() => setIsMessagingOpen(true)}
+                    currentUser={currentUser}
+                    onProfileClick={handleProfileClick}
+                />
                 <MessagingModal isOpen={isMessagingOpen} onClose={() => setIsMessagingOpen(false)} />
+                <AddUserModal
+                    isOpen={isProfileModalOpen}
+                    onClose={() => setIsProfileModalOpen(false)}
+                    onSuccess={() => {
+                        fetchCurrentUser(); // Refresh header
+                        setIsProfileModalOpen(false);
+                    }}
+                    userToEdit={currentUser}
+                    readOnlyRole={true} // LOCK ROLE
+                />
                 <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                     {children}
                 </main>
@@ -529,6 +643,16 @@ const Layout: React.FC<LayoutProps> = ({ view, setView, onOpenGlobalDose, childr
             <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
                 <AppHeader onOpenGlobalDose={onOpenGlobalDose} onToggleSidebar={() => setIsSidebarOpen(true)} onViewPatient={onViewPatient} onOpenMessaging={() => setIsMessagingOpen(true)} />
                 <MessagingModal isOpen={isMessagingOpen} onClose={() => setIsMessagingOpen(false)} />
+                <AddUserModal
+                    isOpen={isProfileModalOpen}
+                    onClose={() => setIsProfileModalOpen(false)}
+                    onSuccess={() => {
+                        fetchCurrentUser(); // Refresh header
+                        setIsProfileModalOpen(false);
+                    }}
+                    userToEdit={currentUser}
+                    readOnlyRole={true} // LOCK ROLE
+                />
                 <main className="flex-1 overflow-y-auto bg-background-light dark:bg-background-dark p-6 md:p-8 relative">
                     {children}
                 </main>

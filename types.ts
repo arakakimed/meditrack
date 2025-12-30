@@ -186,3 +186,21 @@ export const mockProfiles: Profile[] = [
     { role: 'Staff', description: 'Acesso para gerenciar pacientes, agendamentos e registros de medicação. Não pode alterar configurações.', icon: 'medical_services' },
     { role: 'Patient', description: 'Acesso limitado para visualizar seu próprio tratamento, calendário de doses e histórico financeiro.', icon: 'person' },
 ];
+
+// Clinical Data Constants
+export const CLINICAL_ZONES = {
+    Male: [
+        { week: 0, minLoss: 0, maxLoss: 0 },
+        { week: 4, minLoss: 2.5, maxLoss: 5.5 },
+        { week: 8, minLoss: 6.0, maxLoss: 10.0 },
+        { week: 12, minLoss: 9.5, maxLoss: 14.0 },
+        { week: 16, minLoss: 12.0, maxLoss: 17.5 },
+    ],
+    Female: [
+        { week: 0, minLoss: 0, maxLoss: 0 },
+        { week: 4, minLoss: 2.0, maxLoss: 4.5 },
+        { week: 8, minLoss: 5.0, maxLoss: 8.5 },
+        { week: 12, minLoss: 8.0, maxLoss: 12.5 },
+        { week: 16, minLoss: 10.5, maxLoss: 16.0 },
+    ]
+};

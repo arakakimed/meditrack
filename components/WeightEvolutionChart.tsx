@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 // NEW IMPORT (types.ts)
-import { Injection, Patient } from '../types';
+import { Injection, Patient, CLINICAL_ZONES } from '../types';
 
 export interface WeightDataPoint {
     id?: string; // NEW: ID for deletion
@@ -14,9 +14,10 @@ interface WeightEvolutionChartProps {
     patient: Patient;
     weightHistory: WeightDataPoint[]; // Unified history
     onDeleteWeight?: (point: WeightDataPoint) => void;
+    action?: React.ReactNode;
 }
 
-const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, weightHistory, onDeleteWeight }) => {
+const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, weightHistory, onDeleteWeight, action }) => {
     // ... responsive hook ...
     const [isMobile, setIsMobile] = React.useState(false);
     const [hoveredIndex, setHoveredIndex] = React.useState<number | null>(null);
@@ -86,13 +87,115 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
         Z
     ` : "";
 
-    // 4. Target Line
-    const targetY = patient.targetWeight ? getY(patient.targetWeight) : null;
+    // 4. Clinical Target Zone Logic
+    // 4. Clinical Target Zone Logic (Using shared constant)
+    const targetZonePath = useMemo(() => {
+        if (!patient.initialWeight || dataPoints.length === 0) return null;
 
-    // 5. Trend Line (Linear Regression)
+        const startDate = dataPoints[0].date.getTime();
+        const gender = patient.gender === 'Male' ? 'Male' : 'Female';
+        const zones = CLINICAL_ZONES[gender];
+
+        const pointsUpper: [number, number][] = [];
+        const pointsLower: [number, number][] = [];
+
+        zones.forEach(zone => {
+            const date = new Date(startDate + zone.week * 7 * 24 * 60 * 60 * 1000);
+            const upperKg = patient.initialWeight! * (1 - (zone.minLoss / 100));
+            const lowerKg = patient.initialWeight! * (1 - (zone.maxLoss / 100));
+
+            pointsUpper.push([getX(date), getY(upperKg)]);
+            pointsLower.push([getX(date), getY(lowerKg)]);
+        });
+
+        const pathOps = [
+            `M ${pointsUpper[0][0]},${pointsUpper[0][1]}`,
+            ...pointsUpper.map(p => `L ${p[0]},${p[1]}`),
+            ...pointsLower.reverse().map(p => `L ${p[0]},${p[1]}`),
+            'Z'
+        ];
+
+        return pathOps.join(' ');
+    }, [dataPoints, patient.initialWeight, patient.gender, getX, getY]);
+
+    // 5. Super Responder Area (Green Fill Logic)
+    // Area between Patient Line and Lower Limit of Target Zone (when Patient < Lower Limit)
+    const superZonePath = useMemo(() => {
+        if (!patient.initialWeight || dataPoints.length === 0) return null;
+
+        const startDate = dataPoints[0].date.getTime();
+        const gender = patient.gender === 'Male' ? 'Male' : 'Female';
+        const zones = CLINICAL_ZONES[gender];
+
+        // We need to build a polygon that represents the area where the patient is "beating" the chart.
+        // Simplified approach: For each point in history, calculate the "Lower Limit" at that specific date.
+        // If patient weight < Lower Limit, we draw a segment.
+
+        // Note: exact intersection calculation is complex. We will approximate by checking each data point.
+        // Ideally we would interpolate standardized weeks, effectively mapping the "Lower Limit Curve" to the data points' X coordinates.
+
+        const superPointsUpper: [number, number][] = []; // The 'Lower Limit' line (which is effectively the upper bound of this super zone)
+        const superPointsLower: [number, number][] = []; // The Patient's actual weight line
+
+        let hasSuperPoints = false;
+
+        dataPoints.forEach(point => {
+            const daysSinceStart = (point.date.getTime() - startDate) / (1000 * 60 * 60 * 24);
+            const currentWeek = daysSinceStart / 7;
+
+            // Find applicable zone bracket to interpolate limit
+            // Simple linear interpolation between known weeks
+            // (Assuming zones are ordered by week)
+            let w1 = zones[0];
+            let w2 = zones[zones.length - 1];
+
+            for (let i = 0; i < zones.length - 1; i++) {
+                if (currentWeek >= zones[i].week && currentWeek <= zones[i + 1].week) {
+                    w1 = zones[i];
+                    w2 = zones[i + 1];
+                    break;
+                }
+            }
+
+            // Interpolate Max Loss % for this specific date
+            const weekRange = w2.week - w1.week;
+            const progressInBracket = (currentWeek - w1.week) / (weekRange || 1);
+            const maxLossPercent = w1.maxLoss + (w2.maxLoss - w1.maxLoss) * progressInBracket;
+
+            const lowerLimitKg = patient.initialWeight! * (1 - (maxLossPercent / 100));
+
+            // Logic: Is patient weight strictly LESS than the lower limit?
+            if (point.weight < lowerLimitKg) {
+                hasSuperPoints = true;
+                superPointsUpper.push([getX(point.date), getY(lowerLimitKg)]); // The limit line (Top)
+                superPointsLower.push([getX(point.date), getY(point.weight)]); // The patient line (Bottom)
+            } else {
+                // Close the gap to avoid artifacts - clamp to limit
+                const yLimit = getY(lowerLimitKg);
+                superPointsUpper.push([getX(point.date), yLimit]);
+                superPointsLower.push([getX(point.date), yLimit]);
+            }
+        });
+
+        if (!hasSuperPoints || superPointsUpper.length < 2) return null;
+
+        // Build Polygon
+        // M firstUpper -> L restUpper -> L lastLower -> L restLower(reversed) -> Z
+        const pathOps = [
+            `M ${superPointsUpper[0][0]},${superPointsUpper[0][1]}`,
+            ...superPointsUpper.map(p => `L ${p[0]},${p[1]}`),
+            ...superPointsLower.reverse().map(p => `L ${p[0]},${p[1]}`),
+            'Z'
+        ];
+
+        return pathOps.join(' ');
+    }, [dataPoints, patient.initialWeight, patient.gender, getX, getY]);
+
+    // Trend Line (Linear Regression)
     const trendPoints = React.useMemo(() => {
         if (dataPoints.length < 2) return null;
-
+        // ... (existing trend logic kept but simplified for this diff if needed, assuming it's stable)
+        // Actually, let's keep the existing trend logic below, just providing context for replace
         const n = dataPoints.length;
         let sumX = 0;
         let sumY = 0;
@@ -144,7 +247,7 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
 
 
     return (
-        <div className="w-full bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 p-4 md:p-6 overflow-hidden">
+        <div className="w-full bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 p-4 md:p-6 overflow-visible relative">
             {/* ... header ... */}
             <div className="flex justify-between items-center mb-4 md:mb-6">
                 <div>
@@ -153,22 +256,44 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
                         Evolução do Peso
                     </h3>
                 </div>
-                {trendPoints && (
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <span className="w-4 h-0.5 bg-orange-400 opacity-60"></span>
-                        <span>Tendência</span>
+                {action && (
+                    <div className="z-10">
+                        {action}
                     </div>
                 )}
             </div>
 
-            <div className={`w-full transition-all duration-300 ${isMobile ? 'aspect-[4/3]' : 'aspect-[21/9]'} min-h-[250px]`}>
-                <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="xMidYMid meet">
+            <div className={`w-full transition-all duration-300 ${isMobile ? 'aspect-[4/3]' : 'aspect-[21/9]'} min-h-[250px] relative`}>
+
+                {/* Action Button (e.g. Add Weight) - Rendered BEHIND SVG but visible, clickable via pointer-events trick */}
+                {/* SVG is Z-20, Button is Z-10. SVG has pointer-events-none, so clicks pass through to button unless hitting a chart point. */}
+                {/* Tooltip in SVG is Z-auto (inherit Z-20), so it covers button. */}
+                <div className="absolute top-0 right-0 z-10">
+                    {/* Using a prop for the button allows parent to control logic */}
+                    {/* The parent should pass the button via 'action' prop */}
+                </div>
+
+                <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible relative z-20 pointer-events-none" preserveAspectRatio="xMidYMid meet">
                     <defs>
                         <linearGradient id="lineGradient" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.2" />
                             <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
                         </linearGradient>
+                        <clipPath id="chartClip">
+                            <rect x={padding.left} y={0} width={width - padding.left - padding.right} height={height} />
+                        </clipPath>
                     </defs>
+
+                    {/* 1. Clinical Target Zone (Background Layer) */}
+                    {targetZonePath && (
+                        <g clipPath="url(#chartClip)">
+                            <path
+                                d={targetZonePath}
+                                fill="#94a3b8" // Slate-400 (Neutral Gray/Blue)
+                                className="opacity-20 dark:opacity-30"
+                            />
+                        </g>
+                    )}
 
                     {/* Grid Lines (Y-Axis) */}
                     {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
@@ -198,6 +323,33 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
                         );
                     })}
 
+                    {/* Week 16 Annotation (Dynamic) */}
+                    {patient.initialWeight && (
+                        (() => {
+                            const gender = patient.gender === 'Male' ? 'Male' : 'Female';
+                            const zones = CLINICAL_ZONES[gender];
+                            const w16 = zones.find(z => z.week === 16);
+                            if (w16) {
+                                const minKg = (patient.initialWeight * (1 - w16.maxLoss / 100)).toFixed(1);
+                                const maxKg = (patient.initialWeight * (1 - w16.minLoss / 100)).toFixed(1);
+                                // Position at roughly bottom right area or fixed position
+                                return (
+                                    <text
+                                        x={width - padding.right}
+                                        y={height - padding.bottom - 10} // Little above X axis
+                                        textAnchor="end"
+                                        style={{ fontSize: 10 }}
+                                        className="fill-slate-400 font-medium opacity-80"
+                                    >
+                                        Intervalo Esperado (16ª Sem): {minKg}kg - {maxKg}kg
+                                    </text>
+                                );
+                            }
+                            return null;
+                        })()
+                    )}
+
+
                     {/* Trend Line */}
                     {trendPoints && (
                         <line
@@ -209,36 +361,12 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
                             strokeWidth="1.5"
                             strokeDasharray="4 2"
                             className="opacity-60"
+                            clipPath="url(#chartClip)"
                         />
                     )}
 
-                    {/* Target Line */}
-                    {targetY && (
-                        <g>
-                            <line
-                                x1={padding.left}
-                                y1={targetY}
-                                x2={width - padding.right}
-                                y2={targetY}
-                                stroke="#a855f7"
-                                strokeWidth={isMobile ? 1.5 : 2}
-                                strokeDasharray="6 4"
-                                className="opacity-80"
-                            />
-                            <text
-                                x={width - padding.right}
-                                y={targetY - 6}
-                                textAnchor="end"
-                                style={{ fontSize: fontSizeAxis }}
-                                className="fill-purple-500 font-bold uppercase tracking-wider"
-                            >
-                                Meta: {patient.targetWeight}kg
-                            </text>
-                        </g>
-                    )}
-
                     {/* Main Line Area */}
-                    <path d={areaPath} fill="url(#lineGradient)" />
+                    <path d={areaPath} fill="url(#lineGradient)" clipPath="url(#chartClip)" />
 
                     {/* Main Line */}
                     <path
@@ -249,6 +377,7 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         className="drop-shadow-sm"
+                        clipPath="url(#chartClip)"
                     />
 
                     {/* Data Points */}
@@ -256,6 +385,7 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
                         <g
                             key={i}
                             className="cursor-pointer"
+                            style={{ pointerEvents: 'auto' }}
                             onMouseEnter={() => setHoveredIndex(i)}
                             onMouseLeave={() => setHoveredIndex(null)}
                             onClick={() => setHoveredIndex(i === hoveredIndex ? null : i)}
@@ -278,14 +408,14 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
 
                             {/* Tooltip - Only visible if hovered/clicked */}
                             {hoveredIndex === i && (
-                                <g className="animate-in fade-in zoom-in-95 duration-200" style={{ pointerEvents: 'none' }}>
+                                <g className="animate-in fade-in zoom-in-95 duration-200" style={{ pointerEvents: 'auto' }}>
                                     {/* Tooltip Box via foreignObject for better HTML/Button support */}
                                     <foreignObject
                                         x={getX(point.date) - (isMobile ? 50 : 60)}
                                         y={getY(point.weight) - (isMobile ? 55 : 65)}
                                         width={isMobile ? 100 : 120}
                                         height={50}
-                                        style={{ overflow: 'visible', pointerEvents: 'auto' }} // Allow interaction
+                                        style={{ overflow: 'visible' }}
                                     >
                                         <div className="relative flex flex-col items-center justify-center bg-slate-800 text-white rounded-lg shadow-xl px-3 py-1.5 text-xs">
                                             {/* Close Button - Only for manual weights */}
@@ -341,7 +471,17 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
                         </g>
                     )}
                 </svg>
+
             </div>
+
+            {trendPoints && (
+                <div className="flex justify-end mt-4">
+                    <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 dark:bg-slate-900/50 px-3 py-1.5 rounded-full border border-slate-100 dark:border-slate-800">
+                        <span className="w-4 h-0.5 bg-orange-400 opacity-60"></span>
+                        <span>Tendência</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
