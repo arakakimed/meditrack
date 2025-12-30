@@ -775,7 +775,9 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                 if (currentWeek > 16) maxLossPercent = zones[zones.length - 1].maxLoss;
 
                 const expectedWeight = initial * (1 - (maxLossPercent / 100));
-                if (current < expectedWeight) isSuperResponder = true;
+
+                // Rule: Must be at least 4 weeks in to count (avoid honeymoon phase false positives)
+                if (currentWeek >= 4 && current < expectedWeight) isSuperResponder = true;
             }
         }
 
@@ -1069,6 +1071,16 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                                     <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">cake</span> {realPatient.age} anos</span>
                                     <span>•</span>
                                     <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">{realPatient.gender === 'Female' ? 'female' : 'male'}</span> {realPatient.gender === 'Female' ? 'Feminino' : 'Masculino'}</span>
+
+                                    {isSuperResponder && (
+                                        <>
+                                            <span>•</span>
+                                            <div className="bg-gradient-to-r from-amber-300 to-orange-400 text-amber-900 border border-amber-200 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm flex items-center gap-1 animate-in fade-in zoom-in duration-500">
+                                                <span className="material-symbols-outlined text-sm font-bold">bolt</span>
+                                                <span>Super Responder</span>
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -1143,12 +1155,7 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                         </div>
 
                         {/* Super Responder Badge Logic */}
-                        {isSuperResponder && (
-                            <div className="absolute top-3 right-3 bg-gradient-to-r from-amber-300 to-orange-400 text-amber-900 border border-amber-200 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm flex items-center gap-1 animate-in fade-in zoom-in duration-500">
-                                <span className="material-symbols-outlined text-sm font-bold">bolt</span>
-                                <span>Super Responder</span>
-                            </div>
-                        )}
+
 
                         <div className="flex justify-between items-center mb-1 md:mb-2 relative z-10">
                             <p className="text-[10px] md:text-xs font-medium text-blue-100 uppercase tracking-wider">Progresso Total</p>

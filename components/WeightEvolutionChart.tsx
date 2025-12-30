@@ -323,6 +323,18 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
                         );
                     })}
 
+                    {/* 1.5 Super Responder Zone (Green Boost) */}
+                    {superZonePath && (
+                        <g clipPath="url(#chartClip)">
+                            <path
+                                d={superZonePath}
+                                fill="#10b981" // Emerald-500
+                                fillOpacity={0.3}
+                                className="transition-all duration-500"
+                            />
+                        </g>
+                    )}
+
                     {/* Week 16 Annotation (Dynamic) */}
                     {patient.initialWeight && (
                         (() => {
@@ -449,25 +461,41 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
                     {/* X-Axis Labels */}
                     {dataPoints.length > 0 && (
                         <g>
-                            <text
-                                x={getX(dataPoints[0].date)}
-                                y={height - 5}
-                                textAnchor="start"
-                                style={{ fontSize: fontSizeAxis }}
-                                className="fill-slate-400 font-medium"
-                            >
-                                {dataPoints[0].date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}
-                            </text>
+                            {(() => {
+                                const start = dataPoints[0].date;
+                                const end = dataPoints[dataPoints.length - 1].date;
+                                const isSameYear = start.getFullYear() === end.getFullYear();
+                                const isSameMonth = isSameYear && start.getMonth() === end.getMonth();
 
-                            <text
-                                x={getX(dataPoints[dataPoints.length - 1].date)}
-                                y={height - 5}
-                                textAnchor="end"
-                                style={{ fontSize: fontSizeAxis }}
-                                className="fill-slate-400 font-medium"
-                            >
-                                {dataPoints[dataPoints.length - 1].date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}
-                            </text>
+                                // If range is small (same month), show days. Otherwise show month/year.
+                                const formatOpts: Intl.DateTimeFormatOptions = isSameMonth
+                                    ? { day: '2-digit', month: 'short' } // '01 dez'
+                                    : { month: 'short', year: '2-digit' }; // 'dez. 25'
+
+                                return (
+                                    <>
+                                        <text
+                                            x={getX(start)}
+                                            y={height - 5}
+                                            textAnchor="start"
+                                            style={{ fontSize: fontSizeAxis }}
+                                            className="fill-slate-400 font-medium"
+                                        >
+                                            {start.toLocaleDateString('pt-BR', formatOpts)}
+                                        </text>
+
+                                        <text
+                                            x={getX(end)}
+                                            y={height - 5}
+                                            textAnchor="end"
+                                            style={{ fontSize: fontSizeAxis }}
+                                            className="fill-slate-400 font-medium"
+                                        >
+                                            {end.toLocaleDateString('pt-BR', formatOpts)}
+                                        </text>
+                                    </>
+                                );
+                            })()}
                         </g>
                     )}
                 </svg>
