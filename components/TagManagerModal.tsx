@@ -59,6 +59,8 @@ const TagManagerModal: React.FC<TagManagerModalProps> = ({ isOpen, onClose }) =>
         setLoading(false);
     };
 
+    const [tagToDelete, setTagToDelete] = useState<Tag | null>(null);
+
     const handleSaveTag = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newTagName.trim()) return;
@@ -97,15 +99,26 @@ const TagManagerModal: React.FC<TagManagerModalProps> = ({ isOpen, onClose }) =>
         }
     };
 
-    const handleDeleteTag = async (id: string) => {
-        if (confirm('Tem certeza que deseja excluir esta etiqueta?')) {
-            const { error } = await supabase
-                .from('clinic_tags')
-                .delete()
-                .eq('id', id);
+    const handleDeleteTag = (tag: Tag) => {
+        setTagToDelete(tag);
+        // Reset validation errors when opening confirmation
+        setError(null);
+    };
 
-            if (!error) fetchTags();
-            else setError('Erro ao excluir etiqueta');
+    const confirmDelete = async () => {
+        if (!tagToDelete) return;
+
+        const { error } = await supabase
+            .from('clinic_tags')
+            .delete()
+            .eq('id', tagToDelete.id);
+
+        if (!error) {
+            fetchTags();
+            setTagToDelete(null);
+        } else {
+            setError('Erro ao excluir etiqueta');
+            setTagToDelete(null);
         }
     };
 
@@ -146,7 +159,34 @@ const TagManagerModal: React.FC<TagManagerModalProps> = ({ isOpen, onClose }) =>
                     </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                <div className="flex-1 overflow-y-auto p-4 space-y-6 relative">
+                    {/* Delete Confirmation Overlay */}
+                    {tagToDelete && (
+                        <div className="absolute inset-0 z-10 bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200">
+                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mb-4">
+                                <span className="material-symbols-outlined text-3xl text-red-600 dark:text-red-400">delete</span>
+                            </div>
+                            <h4 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Excluir Etiqueta?</h4>
+                            <p className="text-slate-600 dark:text-slate-300 mb-6">
+                                Tem certeza que deseja remover a etiqueta <span className="font-bold text-slate-900 dark:text-white">"{tagToDelete.name}"</span>? Esta ação não pode ser desfeita.
+                            </p>
+                            <div className="flex gap-3 w-full">
+                                <button
+                                    onClick={() => setTagToDelete(null)}
+                                    className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={confirmDelete}
+                                    className="flex-1 px-4 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-600/20 transition-all transform active:scale-95"
+                                >
+                                    Sim, Excluir
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Create/Edit Form */}
                     <form onSubmit={handleSaveTag} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-4">
                         <div>
@@ -248,7 +288,7 @@ const TagManagerModal: React.FC<TagManagerModalProps> = ({ isOpen, onClose }) =>
                                                     <span className="material-symbols-outlined text-lg">edit</span>
                                                 </button>
                                                 <button
-                                                    onClick={() => handleDeleteTag(tag.id)}
+                                                    onClick={() => handleDeleteTag(tag)}
                                                     className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                                                     title="Excluir"
                                                 >

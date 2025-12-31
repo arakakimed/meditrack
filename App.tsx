@@ -10,6 +10,8 @@ import MedicationsPage from './components/MedicationsPage';
 import FinancialsPage from './components/FinancialsPage';
 import PatientProfilePage from './components/PatientProfilePage';
 import SettingsPage from './components/SettingsPage';
+import AddPatientModal from './components/AddPatientModal';
+import TagManagerModal from './components/TagManagerModal';
 
 export type View = 'dashboard' | 'patients' | 'schedule' | 'medications' | 'financials' | 'settings' | 'patient_profile';
 
@@ -20,8 +22,11 @@ const App: React.FC = () => {
     const [currentView, setCurrentView] = useState<View>('dashboard');
     const [loading, setLoading] = useState(true);
 
-    // Estado para quando o Admin visualiza um paciente
     const [adminViewingPatient, setAdminViewingPatient] = useState<Patient | null>(null);
+
+    const [isPatientModalOpen, setIsPatientModalOpen] = useState(false);
+    const [isTagModalOpen, setIsTagModalOpen] = useState(false);
+    const [patientToEdit, setPatientToEdit] = useState<Patient | undefined>(undefined);
 
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
@@ -56,22 +61,7 @@ const App: React.FC = () => {
                 setUserRole(profile.role as any);
                 if (profile.role === 'patient' && profile.patient_id) {
                     const { data: patient } = await supabase.from('patients').select('*').eq('id', profile.patient_id).single();
-                    if (patient) setPatientData({
-                        id: patient.id,
-                        name: patient.name,
-                        initials: patient.initials,
-                        age: patient.age,
-                        gender: patient.gender,
-                        avatarUrl: patient.avatar_url,
-                        currentWeight: patient.current_weight,
-                        initialWeight: patient.initial_weight,
-                        weightChange: patient.weight_change,
-                        targetWeight: patient.target_weight,
-                        height: patient.height,
-                        bmi: patient.bmi,
-                        bmiCategory: patient.bmi_category,
-                        email: patient.email
-                    });
+                    if (patient) setPatientData(mapDatabasePatient(patient));
                 }
             }
         } catch (err) {
@@ -81,13 +71,83 @@ const App: React.FC = () => {
         }
     };
 
+    const mapDatabasePatient = (data: any): Patient => ({
+        id: data.id,
+        name: data.name,
+        initials: data.initials,
+        age: data.age,
+        gender: data.gender,
+        avatarUrl: data.avatar_url,
+        currentWeight: data.current_weight,
+        initialWeight: data.initial_weight,
+        weightChange: data.weight_change,
+        targetWeight: data.target_weight,
+        height: data.height,
+        bmi: data.bmi,
+        bmiCategory: data.bmi_category,
+        email: data.email,
+        tags: data.tags
+    });
+
     const handleLogout = async () => { await supabase.auth.signOut(); };
+
+    const handleAddPatient = () => {
+        setPatientToEdit(undefined);
+        setIsPatientModalOpen(true);
+    };
+
+    const handleEditPatient = (patient: Patient) => {
+        setPatientToEdit(patient);
+        setIsPatientModalOpen(true);
+    };
+
+    // --- FUNÇÃO DE LIBERAÇÃO DE ACESSO (RESTAURADA) ---
+    const handleToggleAccess = async (patient: Patient) => {
+        if (!patient.email) {
+            alert("O paciente precisa de um e-mail cadastrado para ter acesso.");
+            return;
+        }
+
+        const defaultPassword = "Mudar@123";
+        const confirmMessage = `Deseja liberar ou resetar o acesso para ${patient.name}?\n\nLogin: ${patient.email}\nSenha padrão: ${defaultPassword}`;
+
+        if (window.confirm(confirmMessage)) {
+            try {
+                const { error } = await supabase.rpc('handle_patient_access', {
+                    p_patient_id: patient.id,
+                    p_email: patient.email,
+                    p_password: defaultPassword
+                });
+
+                if (error) throw error;
+                alert("Acesso configurado com sucesso! O paciente já pode logar.");
+            } catch (err: any) {
+                console.error("Erro ao liberar acesso:", err);
+                alert("Erro ao liberar acesso. Verifique o console para detalhes.");
+            }
+        }
+    };
+
+    // --- FUNÇÃO DE EXCLUSÃO DE PACIENTE (CONFIRMAÇÃO PADRÃO) ---
+    const handleDeletePatient = async (patient: Patient) => {
+        if (window.confirm(`Tem certeza absoluta que deseja excluir o paciente ${patient.name}? Todos os registros de peso e doses serão perdidos.`)) {
+            try {
+                const { error } = await supabase.from('patients').delete().eq('id', patient.id);
+                if (error) throw error;
+                alert("Paciente removido com sucesso.");
+                // Força atualização da vista para limpar o excluído da lista
+                setCurrentView('dashboard');
+                setTimeout(() => setCurrentView('patients'), 10);
+            } catch (err: any) {
+                alert("Erro ao excluir: " + err.message);
+            }
+        }
+    };
 
     if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (!session) return <AuthPage />;
     if (userRole === 'unauthorized') return <div className="p-10 text-center">Acesso não configurado. <button onClick={handleLogout}>Sair</button></div>;
 
-    // ROTA PACIENTE (Visualização Única)
     if (userRole === 'patient') {
         if (!patientData) return <div className="p-10 text-center">Carregando...</div>;
         return (
@@ -102,34 +162,45 @@ const App: React.FC = () => {
         );
     }
 
-    // ROTA ADMIN (Layout Completo)
     const renderAdminContent = () => {
-        // Se estiver vendo um paciente, renderiza AQUI DENTRO para manter o layout
         if (adminViewingPatient) {
             return (
                 <PatientProfilePage
                     patient={adminViewingPatient}
                     onBack={() => setAdminViewingPatient(null)}
                     onGoHome={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }}
-                    readonly={false} // Admin tem poder total
+                    readonly={false}
                 />
             );
         }
 
         switch (currentView) {
-            case 'dashboard': return <DashboardPage onViewPatient={(p) => setCurrentView('patients')} onAdministerDose={() => { }} onAddPatient={() => setCurrentView('patients')} setView={setCurrentView} />;
-            case 'patients': return <PatientsPage onViewPatient={(patient) => setAdminViewingPatient(patient)} onEditPatient={() => { }} onAddPatient={() => { }} onManageTags={() => { }} />;
+            case 'dashboard':
+                return <DashboardPage
+                    onViewPatient={(p) => setAdminViewingPatient(p)}
+                    onAdministerDose={() => { }}
+                    onAddPatient={handleAddPatient}
+                    setView={setCurrentView}
+                />;
+            case 'patients':
+                return <PatientsPage
+                    onViewPatient={(patient) => setAdminViewingPatient(patient)}
+                    onEditPatient={handleEditPatient}
+                    onAddPatient={handleAddPatient}
+                    onManageTags={() => setIsTagModalOpen(true)}
+                    onToggleAccess={handleToggleAccess} // Função conectada
+                    onDeletePatient={handleDeletePatient} // Função conectada
+                />;
             case 'schedule': return <SchedulePage />;
             case 'medications': return <MedicationsPage />;
             case 'financials': return <FinancialsPage />;
             case 'settings': return <SettingsPage />;
-            default: return <DashboardPage setView={setCurrentView} onViewPatient={() => { }} onAdministerDose={() => { }} onAddPatient={() => { }} />;
+            default: return <DashboardPage setView={setCurrentView} onViewPatient={() => { }} onAdministerDose={() => { }} onAddPatient={handleAddPatient} />;
         }
     };
 
     return (
         <div className="flex h-screen bg-slate-50 dark:bg-slate-900 overflow-hidden">
-            {/* Sidebar Desktop */}
             <aside className="hidden md:flex flex-col w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 z-20">
                 <div className="p-6 flex items-center gap-3">
                     <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">M</div>
@@ -141,14 +212,15 @@ const App: React.FC = () => {
                     <SidebarItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
                     <SidebarItem icon="medication" label="Medicações" active={currentView === 'medications'} onClick={() => { setAdminViewingPatient(null); setCurrentView('medications'); }} />
                     <SidebarItem icon="payments" label="Financeiro" active={currentView === 'financials'} onClick={() => { setAdminViewingPatient(null); setCurrentView('financials'); }} />
-                    <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-700"><SidebarItem icon="settings" label="Configurações" active={currentView === 'settings'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} /></div>
+                    <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-700">
+                        <SidebarItem icon="settings" label="Configurações" active={currentView === 'settings'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} />
+                    </div>
                 </nav>
                 <div className="p-4 border-t border-slate-200 dark:border-slate-700">
                     <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-slate-600 hover:bg-slate-50 transition-colors"><span className="material-symbols-outlined">logout</span> <span className="font-medium text-sm">Sair</span></button>
                 </div>
             </aside>
 
-            {/* Mobile Nav */}
             <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200 flex justify-around p-2 pb-safe z-50">
                 <MobileNavItem icon="dashboard" label="Painel" active={currentView === 'dashboard' && !adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }} />
                 <MobileNavItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
@@ -163,6 +235,22 @@ const App: React.FC = () => {
                 </header>
                 <div className="flex-1 overflow-y-auto p-0">{renderAdminContent()}</div>
             </main>
+
+            {isPatientModalOpen && (
+                <AddPatientModal
+                    isOpen={isPatientModalOpen}
+                    onClose={() => setIsPatientModalOpen(false)}
+                    onSuccess={() => { setIsPatientModalOpen(false); }}
+                    patientToEdit={patientToEdit}
+                />
+            )}
+
+            {isTagModalOpen && (
+                <TagManagerModal
+                    isOpen={isTagModalOpen}
+                    onClose={() => setIsTagModalOpen(false)}
+                />
+            )}
         </div>
     );
 };
