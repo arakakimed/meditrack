@@ -4,7 +4,9 @@ import { supabase } from '../lib/supabase';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 import AddUserModal from './AddUserModal';
 import EditRoleModal from './EditRoleModal';
+import EnableAccessModal from './EnableAccessModal';
 
+// --- Subcomponente: ProfileCard ---
 const ProfileCard: React.FC<{ profile: Profile, onEdit: (profile: Profile) => void }> = ({ profile, onEdit }) => {
     const getRoleName = (role: string) => {
         switch (role) {
@@ -35,6 +37,7 @@ const ProfileCard: React.FC<{ profile: Profile, onEdit: (profile: Profile) => vo
     );
 };
 
+// --- Subcomponente: UserManagementTable ---
 interface UserManagementTableProps {
     users: User[];
     onApprove: (id: string, user: User) => void;
@@ -57,7 +60,7 @@ const UserManagementTable: React.FC<UserManagementTableProps> = ({ users, onAppr
 
     return (
         <>
-            {/* DESKTOP VIEW: Table */}
+            {/* DESKTOP VIEW */}
             <div className="hidden md:block overflow-x-auto">
                 <table className="w-full">
                     <thead>
@@ -82,7 +85,7 @@ const UserManagementTable: React.FC<UserManagementTableProps> = ({ users, onAppr
                                         )}
                                         <div>
                                             <div className="font-bold text-slate-900 dark:text-white">{user.name}</div>
-                                            <div className="text-sm text-slate-500">{user.email}</div>
+                                            <div className="text-sm text-slate-500">{user.email || 'Sem email'}</div>
                                         </div>
                                     </div>
                                 </td>
@@ -109,7 +112,7 @@ const UserManagementTable: React.FC<UserManagementTableProps> = ({ users, onAppr
                                     <div className="flex items-center justify-end gap-2">
                                         {user.status === 'Pending' ? (
                                             <>
-                                                <button onClick={() => onApprove(user.id, user)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Aprovar">
+                                                <button onClick={() => onApprove(user.id, user)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Liberar Acesso">
                                                     <span className="material-symbols-outlined text-xl">check_circle</span>
                                                 </button>
                                                 <button onClick={() => onReject(user.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Rejeitar">
@@ -134,7 +137,7 @@ const UserManagementTable: React.FC<UserManagementTableProps> = ({ users, onAppr
                 </table>
             </div>
 
-            {/* MOBILE VIEW: Aesthetic Slider/Cards */}
+            {/* MOBILE VIEW */}
             <div className="md:hidden flex flex-col gap-4">
                 {users.map((user) => (
                     <div key={user.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between gap-4">
@@ -148,7 +151,7 @@ const UserManagementTable: React.FC<UserManagementTableProps> = ({ users, onAppr
                             )}
                             <div className="min-w-0">
                                 <div className="font-bold text-slate-900 dark:text-white truncate">{user.name}</div>
-                                <div className="text-xs text-slate-500 truncate mb-1">{user.email}</div>
+                                <div className="text-xs text-slate-500 truncate mb-1">{user.email || 'Sem email'}</div>
                                 <div className="flex gap-2">
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${user.role === 'Admin' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
                                         user.role === 'Staff' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
@@ -194,7 +197,7 @@ const UserManagementTable: React.FC<UserManagementTableProps> = ({ users, onAppr
     );
 };
 
-
+// --- Componente Principal: SettingsPage ---
 const SettingsPage: React.FC = () => {
     const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(true);
@@ -210,82 +213,71 @@ const SettingsPage: React.FC = () => {
     const [isEditRoleModalOpen, setIsEditRoleModalOpen] = useState(false);
     const [isPatientListModalOpen, setIsPatientListModalOpen] = useState(false);
 
+    // ESTADOS DO MODAL DE ACESSO
+    const [isAccessModalOpen, setIsAccessModalOpen] = useState(false);
+    const [selectedPatientForAccess, setSelectedPatientForAccess] = useState<any>(null);
+
     const fetchUsers = async () => {
         setLoading(true);
         try {
-            // 1. Load LocalStorage (The Cache / Source of Truth for Offline)
+            // 1. LocalStorage
             const localData = localStorage.getItem('meditrack_profiles');
             let localUsers: User[] = localData ? JSON.parse(localData) : [];
-
-            // Map for easy merging (ID -> User)
             const userMap = new Map<string, User>();
-
-            // Populate map with local users first
             localUsers.forEach(u => userMap.set(u.id, u));
 
-            // 2. Attempt Fetch from Supabase (Profiles)
+            // 2. Supabase Profiles
             try {
-                const { data: profilesData, error: profilesError } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-
+                const { data: profilesData } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
                 if (profilesData) {
                     profilesData.forEach((p: any) => {
                         userMap.set(p.id, {
                             id: p.id,
-                            name: p.name,
+                            name: p.name || 'Sem nome',
                             email: p.email || '',
                             role: p.role as UserRole,
-                            status: p.status as UserStatus,
+                            status: 'Active',
                             avatarUrl: p.avatar_url,
-                            initials: p.initials || p.name.substring(0, 2).toUpperCase()
+                            initials: p.initials || (p.name ? p.name.substring(0, 2).toUpperCase() : '??')
                         });
                     });
                 }
-            } catch (dbErr) {
-                console.warn("Supabase profiles silent fail:", dbErr);
-            }
+            } catch (dbErr) { console.warn("Supabase profiles silent fail:", dbErr); }
 
-            // 3. Attempt Fetch Manual Patients (Pending Users)
+            // 3. Manual Patients (Pending)
             try {
                 const { data: patientsData } = await supabase.from('patients').select('*').order('created_at', { ascending: false });
-
                 if (patientsData) {
                     patientsData.forEach((pt: any) => {
-                        // Only add if not already a profile (check by user_id or id)
-                        // Note: Manual patients don't have user_id pointing to a profile usually, or it points to creator.
-                        // We filter out those who are definitely already profiles.
-                        if (!userMap.has(pt.user_id)) {
-                            // Use patient ID as key for the list
-                            userMap.set(pt.id, {
-                                id: pt.id,
-                                name: pt.name,
-                                email: '',
-                                role: 'Patient',
-                                status: 'Pending',
-                                avatarUrl: pt.avatar_url,
-                                initials: pt.name.substring(0, 2).toUpperCase(),
-                                isManualPatient: true
-                            });
+                        let isLinked = false;
+                        if (pt.user_id && userMap.has(pt.user_id)) {
+                            isLinked = true;
+                        }
+
+                        if (!isLinked) {
+                            if (!userMap.has(pt.id)) {
+                                userMap.set(pt.id, {
+                                    id: pt.id,
+                                    name: pt.name,
+                                    email: pt.email || '',
+                                    role: 'Patient',
+                                    status: 'Pending',
+                                    avatarUrl: pt.avatar_url,
+                                    initials: pt.name.substring(0, 2).toUpperCase(),
+                                    isManualPatient: true
+                                });
+                            }
                         }
                     });
                 }
-            } catch (patErr) {
-                console.warn("Supabase patients silent fail:", patErr);
-            }
+            } catch (patErr) { console.warn("Supabase patients silent fail:", patErr); }
 
-            // 4. Convert Map back to Array & Sort
             const mergedUsers = Array.from(userMap.values());
-
-            // Optional: Sort by name or role if needed, or rely on insert order
-            // Let's keep mocks if completely empty
-            if (mergedUsers.length === 0) {
-                setUsers(mockUsers);
-            } else {
-                setUsers(mergedUsers); // No mockUsers fallback if cache exists but is empty? Maybe better to keep it empty if user wiped it.
-            }
+            if (mergedUsers.length === 0) setUsers(mockUsers);
+            else setUsers(mergedUsers);
 
         } catch (err) {
             console.error(err);
-            // Final fallback
             const localData = localStorage.getItem('meditrack_profiles');
             setUsers(localData ? JSON.parse(localData) : mockUsers);
         } finally {
@@ -295,40 +287,23 @@ const SettingsPage: React.FC = () => {
 
     useEffect(() => {
         fetchUsers();
-        // Load role definitions from local storage if any
         const savedRoles = localStorage.getItem('meditrack_role_definitions');
-        if (savedRoles) {
-            setRoleProfiles(JSON.parse(savedRoles));
-        }
+        if (savedRoles) setRoleProfiles(JSON.parse(savedRoles));
     }, []);
 
-    const handleApprove = async (id: string, user: User) => {
-        // Optimistic update
-        const updatedUsers = users.map(u => u.id === id ? { ...u, status: 'Active' as UserStatus } : u);
-        setUsers(updatedUsers);
-
-        // Try Supabase first
-        try {
-            const { error } = await supabase.from('profiles').update({ status: 'Active' }).eq('id', id);
-            if (error) throw error;
-        } catch (err) {
-            console.warn("Could not update Supabase, updating localStorage", err);
-            // Fallback: Update localStorage
-            localStorage.setItem('meditrack_profiles', JSON.stringify(updatedUsers));
-        }
+    // Ação ao clicar no Check Verde
+    const handleApprove = (id: string, user: User) => {
+        setSelectedPatientForAccess({
+            id: user.id,
+            name: user.name,
+            email: user.email
+        });
+        setIsAccessModalOpen(true);
     };
 
     const handleReject = async (id: string) => {
         const updatedUsers = users.filter(u => u.id !== id);
         setUsers(updatedUsers);
-
-        try {
-            const { error } = await supabase.from('profiles').delete().eq('id', id);
-            if (error) throw error;
-        } catch (err) {
-            console.warn("Could not delete from Supabase, updating localStorage", err);
-            localStorage.setItem('meditrack_profiles', JSON.stringify(updatedUsers));
-        }
     };
 
     const handleDeleteClick = (id: string) => {
@@ -339,55 +314,21 @@ const SettingsPage: React.FC = () => {
     const confirmDelete = async () => {
         if (!userToDelete) return;
         setDeleteLoading(true);
-
-        const userObj = users.find(u => u.id === userToDelete);
-
         try {
-            // Optimistic
-            const updatedUsers = users.filter(u => u.id !== userToDelete);
-
-            let error;
-            if (userObj?.isManualPatient) {
-                // Delete from patients table
-                const { error: dbError } = await supabase.from('patients').delete().eq('id', userToDelete);
-                error = dbError;
-            } else {
-                // Delete from profiles table
-                const { error: dbError } = await supabase.from('profiles').delete().eq('id', userToDelete);
-                error = dbError;
-            }
-
-            if (error) {
-                console.warn("Supabase delete failed (using fallback):", error);
-                // Fallback to localStorage
-                localStorage.setItem('meditrack_profiles', JSON.stringify(updatedUsers));
-            }
-
-            setUsers(updatedUsers);
-            setIsDeleteModalOpen(false);
-            setUserToDelete(null);
-        } catch (err) {
-            console.error(err);
-            // Even on crash, ensure local state is consistent
             const updatedUsers = users.filter(u => u.id !== userToDelete);
             setUsers(updatedUsers);
             localStorage.setItem('meditrack_profiles', JSON.stringify(updatedUsers));
-            setIsDeleteModalOpen(false);
-        } finally {
+        } catch (err) { console.error(err); }
+        finally {
             setDeleteLoading(false);
+            setIsDeleteModalOpen(false);
+            setUserToDelete(null);
+            fetchUsers();
         }
     };
 
-    const handleEditUser = (user: User) => {
-        setEditingUser(user);
-        setIsAddUserModalOpen(true);
-    };
-
-    const handleEditRole = (roleProfile: Profile) => {
-        setEditingRole(roleProfile);
-        setIsEditRoleModalOpen(true);
-    };
-
+    const handleEditUser = (user: User) => { setEditingUser(user); setIsAddUserModalOpen(true); };
+    const handleEditRole = (roleProfile: Profile) => { setEditingRole(roleProfile); setIsEditRoleModalOpen(true); };
     const saveRoleUpdate = (updatedProfile: Profile) => {
         const updatedRoles = roleProfiles.map(p => p.role === updatedProfile.role ? updatedProfile : p);
         setRoleProfiles(updatedRoles);
@@ -395,16 +336,13 @@ const SettingsPage: React.FC = () => {
     };
 
     return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Header section... */}
-
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 md:pb-0">
             {/* Profiles Section */}
             <section className="space-y-4">
                 <div>
                     <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Perfis de Usuário</h2>
                     <p className="text-slate-500 dark:text-slate-400">Defina níveis de acesso e permissões para cada perfil.</p>
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {roleProfiles.map((profile) => (
                         <ProfileCard key={profile.role} profile={profile} onEdit={handleEditRole} />
@@ -448,7 +386,7 @@ const SettingsPage: React.FC = () => {
                 </div>
             </section>
 
-            {/* App Eligible Patients Slider */}
+            {/* App Eligible Patients Section */}
             <section className="space-y-4 pt-4">
                 <div className="flex items-center justify-between">
                     <div>
@@ -457,7 +395,7 @@ const SettingsPage: React.FC = () => {
                             Pacientes Aptos para App
                         </h2>
                         <p className="text-sm text-slate-500 dark:text-slate-400">
-                            Pacientes listados abaixo podem acessar o aplicativo. Para pacientes cadastrados manualmente, o acesso será liberado em breve.
+                            Pacientes listados abaixo podem acessar o aplicativo. Aprove o acesso clicando no check.
                         </p>
                     </div>
                     <button
@@ -503,12 +441,13 @@ const SettingsPage: React.FC = () => {
                 )}
             </section>
 
+            {/* Modals */}
             <ConfirmDeleteModal
                 isOpen={isDeleteModalOpen}
                 onClose={() => setIsDeleteModalOpen(false)}
                 onConfirm={confirmDelete}
                 title="Excluir Usuário"
-                description="Tem certeza que deseja excluir este usuário? Esta ação não pode ser desfeita."
+                description="Tem certeza que deseja excluir este usuário?"
                 isLoading={deleteLoading}
             />
 
@@ -516,18 +455,7 @@ const SettingsPage: React.FC = () => {
                 isOpen={isAddUserModalOpen}
                 onClose={() => { setIsAddUserModalOpen(false); setEditingUser(null); }}
                 onSuccess={(updatedUser) => {
-                    // Optimistic update
-                    if (updatedUser) {
-                        setUsers(prev => {
-                            const exists = prev.find(p => p.id === updatedUser.id);
-                            if (exists) {
-                                return prev.map(p => p.id === updatedUser.id ? { ...p, ...updatedUser } : p);
-                            }
-                            return [updatedUser, ...prev];
-                        });
-                    }
-
-                    fetchUsers(); // Background refresh
+                    if (updatedUser) fetchUsers();
                 }}
                 userToEdit={editingUser}
             />
@@ -537,6 +465,15 @@ const SettingsPage: React.FC = () => {
                 onClose={() => setIsEditRoleModalOpen(false)}
                 roleProfile={editingRole}
                 onSave={saveRoleUpdate}
+            />
+
+            <EnableAccessModal
+                isOpen={isAccessModalOpen}
+                onClose={() => { setIsAccessModalOpen(false); setSelectedPatientForAccess(null); }}
+                patient={selectedPatientForAccess}
+                onSuccess={() => {
+                    fetchUsers();
+                }}
             />
         </div>
     );

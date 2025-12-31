@@ -1,24 +1,17 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import WeightEvolutionChart from './WeightEvolutionChart';
-import { Patient, MedicationStep, Injection, CLINICAL_ZONES } from '../types';
+import WeightEvolutionChart, { WeightDataPoint } from './WeightEvolutionChart';
+import { Patient, MedicationStep, Injection } from '../types';
 import { supabase } from '../lib/supabase';
 import EditMedicationStepModal from './EditMedicationStepModal';
 import AddPatientModal from './AddPatientModal';
-import AddHistoricalDoseModal from './AddHistoricalDoseModal';
-import PaymentModal from './PaymentModal';
-import EditDoseModal from './EditDoseModal';
 import GlobalRegisterDoseModal from './GlobalRegisterDoseModal';
+import PaymentModal from './PaymentModal';
 import DosePaymentModal from './DosePaymentModal';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
-import MiniCalendar from './MiniCalendar';
-
-import { PatientFinancials } from './PatientFinancials';
 import AddWeightModal from './AddWeightModal';
-import { WeightDataPoint } from './WeightEvolutionChart';
+import { PatientFinancials } from './PatientFinancials';
 
-
-
-
+// --- JORNADA DO PACIENTE ---
 const MedicationPath: React.FC<{
     steps: MedicationStep[],
     onEditStep: (step: MedicationStep) => void,
@@ -26,445 +19,187 @@ const MedicationPath: React.FC<{
     onPaymentClick: (step: MedicationStep) => void,
     onDeleteStep: (step: MedicationStep) => void,
     paidStepIds: Set<string>,
-    patient: Patient
-}> = ({ steps, onEditStep, onAddStep, onPaymentClick, onDeleteStep, paidStepIds, patient }) => {
+    patient: Patient,
+    readonly?: boolean
+}> = ({ steps, onEditStep, onAddStep, onDeleteStep, patient, readonly }) => {
 
-    // Helper to calculate weight change text
     const getWeightInfo = (step: MedicationStep, index: number) => {
-        // Validation
-        if (!patient.initialWeight) return null;
-
-        // 1st Dose: "Peso inicial X kg"
-        if (index === 0) {
-            return {
-                text: `Peso inicial ${patient.initialWeight}kg`,
-                type: 'initial'
-            };
-        }
-
-        // Use recorded weight if available (Historical Data)
+        if (!patient || !patient.initialWeight) return null;
+        if (index === 0) return { text: `Peso inicial ${patient.initialWeight}kg`, type: 'initial' };
         if (step.recordedWeight) {
             const diff = step.recordedWeight - patient.initialWeight;
             if (diff === 0) return { text: '-', type: 'maintenance', current: `${step.recordedWeight}kg` };
-
             return {
                 text: `${Math.abs(diff).toFixed(1)}kg`,
                 type: diff < 0 ? 'loss' : 'gain',
                 current: `${step.recordedWeight}kg`
             };
         }
-
-        // For steps without recorded weight (e.g. old data), but are marked as Done
-        if (step.status === 'Concluído' && !step.recordedWeight) {
-            return null; // Don't show misleading info, or show "Peso ñ reg."
-            // return { text: 'Não reg.', type: 'maintenance', current: '--' }; 
-        }
-
-        return null;
-
         return null;
     };
 
-
     return (
         <div className="relative pl-24 pt-2">
-            {/* Continuous Line - Adjusted for new padding */}
-            {/* pl-24 is 96px. Circle is 36px wide (w-9). Center is 18px. line should be at 96 + 18 - 1 (width/2) = 113px? */}
-            {/* Let's try 96px + 18px = 114px left? */}
-            {/* Actually, visually tuning: left-[113px] */}
             <div className="absolute top-4 left-[113px] bottom-0 w-0.5 bg-slate-200 dark:bg-slate-700 -z-0"></div>
-
             {steps.map((step, index) => {
-                const isPaid = step.id ? paidStepIds.has(step.id) : false;
                 const weightInfo = getWeightInfo(step, index);
                 const doseNumber = index + 1;
-
-                // Status Colors
                 const isCompleted = step.status === 'Concluído';
                 const isCurrent = step.status === 'Atual';
-
-                // Date Formatting
-                let dateDay = '';
-                let dateMonth = '';
-                let dateWeekday = '';
+                let dateDisplay = { day: '', month: '', weekday: '' };
 
                 if (step.date) {
-                    const parts = step.date.split(' de '); // "26 de dez."
-                    if (parts.length >= 2) {
-                        dateDay = parts[0];
-                        dateMonth = parts[1].replace('.', '').toUpperCase();
-
-                        // Parse date for weekday
-                        // Needs year. Assume current year or infer?
-                        // If date is "26 de dez.", let's assume current year or nearby.
-                        // Journey steps usually are recent.
-                        const currentYear = new Date().getFullYear();
-                        const monthMap: { [key: string]: number } = {
-                            'jan': 0, 'fev': 1, 'mar': 2, 'abr': 3, 'mai': 4, 'jun': 5,
-                            'jul': 6, 'ago': 7, 'set': 8, 'out': 9, 'nov': 10, 'dez': 11
-                        };
-                        const monthIndex = monthMap[dateMonth.toLowerCase()];
-                        if (monthIndex !== undefined) {
-                            const d = new Date(currentYear, monthIndex, parseInt(dateDay));
-                            dateWeekday = d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '').toUpperCase();
+                    try {
+                        const dateStr = String(step.date);
+                        if (dateStr.includes('-')) {
+                            const parts = dateStr.split('-');
+                            if (parts.length === 3) {
+                                const dObj = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                                dateDisplay.day = String(dObj.getDate()).padStart(2, '0');
+                                dateDisplay.month = dObj.toLocaleString('pt-BR', { month: 'short' }).replace('.', '').toUpperCase();
+                                dateDisplay.weekday = dObj.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '').toUpperCase();
+                            }
+                        } else {
+                            const parts = dateStr.split(/[\s/]+/);
+                            if (parts.length >= 1) dateDisplay.day = parts[0];
+                            if (parts.length >= 2) dateDisplay.month = parts[1].substring(0, 3).toUpperCase();
                         }
-
-                    } else if (step.date.includes('/')) {
-                        const d = step.date.split('/');
-                        const dateObj = new Date(parseInt(d[2]), parseInt(d[1]) - 1, parseInt(d[0]));
-                        dateDay = d[0];
-                        dateMonth = dateObj.toLocaleString('pt-BR', { month: 'short' }).replace('.', '').toUpperCase();
-                        dateWeekday = dateObj.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '').toUpperCase();
-                    }
+                    } catch (e) { }
                 }
 
                 return (
                     <div key={index} className={`relative z-10 flex gap-4 mb-10 group ${step.status === 'Bloqueado' ? 'opacity-50 grayscale' : ''}`}>
-
-                        {/* Date Label (Left Side) */}
                         <div className="absolute -left-20 top-1 w-16 text-right pr-2">
-                            {step.date && isCompleted && (
+                            {(step.status === 'Concluído' || step.status === 'Atual' || step.status === 'Pulada') && step.date && (
                                 <div className="flex flex-col items-end">
-                                    <span className="text-sm font-bold text-slate-700 dark:text-slate-300 leading-none">{dateDay}</span>
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mt-0.5">{dateMonth}</span>
-                                    <span className="text-[9px] font-medium text-slate-300 dark:text-slate-600 uppercase tracking-wider leading-none mt-0.5">{dateWeekday}</span>
+                                    <span className="text-sm font-bold text-slate-700 dark:text-slate-300 leading-none">{dateDisplay.day}</span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mt-0.5">{dateDisplay.month}</span>
+                                    <span className="text-[9px] font-medium text-slate-300 dark:text-slate-600 uppercase tracking-wider leading-none mt-0.5">{dateDisplay.weekday}</span>
                                 </div>
                             )}
                         </div>
-
-                        {/* Status Circle */}
                         <div
-                            className={`
-                                flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center border-[3px] shadow-sm transition-all duration-300
-                                ${isCompleted
-                                    ? 'bg-emerald-100 border-emerald-500 text-emerald-600'
-                                    : isCurrent
-                                        ? 'bg-blue-600 border-blue-200 text-white shadow-blue-500/30 scale-110'
-                                        : 'bg-slate-50 border-slate-200 text-slate-300'
-                                }
-                                group-hover:scale-110 cursor-pointer bg-white dark:bg-slate-800
+                            className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center border-[3px] shadow-sm transition-all duration-300
+                                ${isCompleted ? 'bg-emerald-100 border-emerald-500 text-emerald-600' : isCurrent ? 'bg-blue-600 border-blue-200 text-white shadow-blue-500/30 scale-110' : 'bg-slate-50 border-slate-200 text-slate-300'}
+                                ${!readonly ? 'cursor-pointer group-hover:scale-110' : 'cursor-default'} bg-white dark:bg-slate-800
                             `}
-                            onClick={() => onEditStep(step)}
+                            onClick={() => !readonly && onEditStep(step)}
                         >
-                            {isCompleted ? (
-                                <span className="material-symbols-outlined text-lg font-bold">check</span>
-                            ) : isCurrent ? (
-                                <span className="material-symbols-outlined text-lg animate-pulse">pill</span>
-                            ) : (
-                                <span className="text-xs font-bold">{doseNumber}</span>
-                            )}
+                            {isCompleted ? <span className="material-symbols-outlined text-lg font-bold">check</span> : isCurrent ? <span className="material-symbols-outlined text-lg animate-pulse">pill</span> : <span className="text-xs font-bold">{doseNumber}</span>}
                         </div>
-
-                        {/* Content Card */}
                         <div className="flex-1 flex flex-col pt-1 min-w-0">
                             <div className="flex items-center justify-between mb-1">
                                 <h4 className={`text-base font-bold flex items-center gap-2 ${isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-slate-800 dark:text-slate-200'}`}>
                                     {doseNumber}ª dose <span className="text-slate-300">•</span> {step.dosage}
                                 </h4>
-
-                                <div className="flex items-center gap-2">
-
-
-                                    {/* Delete Icon */}
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); onDeleteStep(step); }}
-                                        className="w-8 h-8 rounded-full flex items-center justify-center transition-all bg-slate-50 text-slate-300 hover:bg-rose-100 hover:text-rose-500"
-                                        title="Excluir Etapa"
-                                    >
-                                        <span className="material-symbols-outlined text-lg">delete</span>
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Weight Info Row */}
-                            <div className="flex items-center gap-2">
-                                {weightInfo && (
-                                    <>
-                                        {weightInfo.type === 'initial' && (
-                                            <div className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md">
-                                                {weightInfo.text}
-                                            </div>
-                                        )}
-                                        {weightInfo.type === 'loss' && (
-                                            <div className="flex items-center gap-1.5 animate-in slide-in-from-left-2 duration-300">
-                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{weightInfo.current}</span>
-                                                <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded text-[10px] font-bold">
-                                                    <span className="material-symbols-outlined text-[10px]">arrow_downward</span>
-                                                    {weightInfo.text}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {weightInfo.type === 'gain' && (
-                                            <div className="flex items-center gap-1.5 animate-in slide-in-from-left-2 duration-300">
-                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{weightInfo.current}</span>
-                                                <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 rounded text-[10px] font-bold">
-                                                    <span className="material-symbols-outlined text-[10px]">arrow_upward</span>
-                                                    {weightInfo.text}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {weightInfo.type === 'maintenance' && (
-                                            <div className="flex items-center gap-1.5">
-                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{weightInfo.current}</span>
-                                                <div className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded text-[10px] font-bold">
-                                                    -
-                                                </div>
-                                            </div>
-                                        )}
-                                    </>
+                                {!readonly && (
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={(e) => { e.stopPropagation(); onDeleteStep(step); }} className="w-8 h-8 rounded-full flex items-center justify-center transition-all bg-slate-50 text-slate-300 hover:bg-rose-100 hover:text-rose-500">
+                                            <span className="material-symbols-outlined text-lg">delete</span>
+                                        </button>
+                                    </div>
                                 )}
                             </div>
-
-                            {/* Current Progress Bar */}
-                            {isCurrent && step.progress && (
-                                <div className="mt-3">
-                                    <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                        <div
-                                            className="h-full bg-blue-500 rounded-full transition-all duration-500"
-                                            style={{ width: `${step.progress}%` }}
-                                        ></div>
+                            <div className="flex items-center gap-2">
+                                {weightInfo && (
+                                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-bold ${weightInfo.type === 'loss' ? 'bg-emerald-100 text-emerald-700' :
+                                            weightInfo.type === 'gain' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'
+                                        }`}>
+                                        {weightInfo.type === 'loss' && <span className="material-symbols-outlined text-[12px]">arrow_downward</span>}
+                                        {weightInfo.type === 'gain' && <span className="material-symbols-outlined text-[12px]">arrow_upward</span>}
+                                        {weightInfo.current && <span>{weightInfo.current}</span>}
                                     </div>
-                                </div>
-                            )}
+                                )}
+                            </div>
                         </div>
                     </div>
                 );
             })}
-
-            {/* Add Step Button */}
-            <button
-                onClick={onAddStep}
-                className="group flex items-center gap-3 relative z-10 ml-0.5 mt-2 transition-all hover:translate-x-1"
-            >
-                <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center text-slate-400 group-hover:border-blue-400 group-hover:text-blue-500 transition-colors">
-                    <span className="material-symbols-outlined text-lg">add</span>
-                </div>
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider group-hover:text-blue-500 transition-colors">
-                    Adicionar Etapa
-                </span>
-            </button>
+            {!readonly && (
+                <button onClick={onAddStep} className="group flex items-center gap-3 relative z-10 ml-0.5 mt-2 transition-all hover:translate-x-1">
+                    <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center text-slate-400 group-hover:border-blue-400 group-hover:text-blue-500 transition-colors">
+                        <span className="material-symbols-outlined text-lg">add</span>
+                    </div>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider group-hover:text-blue-500 transition-colors">Adicionar Etapa</span>
+                </button>
+            )}
         </div>
     );
 };
 
+// --- HISTÓRICO ---
 const InjectionHistoryTable: React.FC<{
     injections: Injection[],
     onDelete: (id: string, injection: Injection) => void,
     onEdit: (injection: Injection) => void,
     onAddHistorical: () => void,
     onTogglePayment: (injection: Injection) => void,
-    highlightedDate?: string | null
-}> = ({ injections, onDelete, onEdit, onAddHistorical, onTogglePayment, highlightedDate }) => {
-    const [expandedRow, setExpandedRow] = React.useState<number | null>(null);
+    highlightedDate?: string | null,
+    readonly?: boolean
+}> = ({ injections, onDelete, onEdit, onAddHistorical, onTogglePayment, highlightedDate, readonly }) => {
+    const [expandedRow, setExpandedRow] = useState<number | null>(null);
+    const formatCurrency = (value: number) => value ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '-';
 
-    const formatCurrency = (value: number) => {
-        if (!value) return '-';
-        return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    };
-
+    // Data Helper seguro
     const formatAestheticDate = (dateStr: string) => {
-        // Convert "12 Fev, 2024" to "12 Fev 2024" - Clean and aesthetic
-        const months: any = {
-            'jan': 'Jan', 'fev': 'Fev', 'mar': 'Mar', 'abr': 'Abr',
-            'mai': 'Mai', 'jun': 'Jun', 'jul': 'Jul', 'ago': 'Ago',
-            'set': 'Set', 'out': 'Out', 'nov': 'Nov', 'dez': 'Dez'
-        };
-
-        const parts = dateStr.split(' ');
-        if (parts.length >= 3) {
-            const day = parts[0];
-            const monthKey = parts[1].toLowerCase().replace(',', '');
-            const month = months[monthKey] || parts[1];
-            const year = parts[2];
-
-            return `${day} ${month} ${year}`;
-        }
-        return dateStr;
-    };
-
-    const toggleRow = (index: number) => {
-        setExpandedRow(expandedRow === index ? null : index);
+        try {
+            if (!dateStr) return '';
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return dateStr;
+            const day = d.getDate();
+            const month = d.toLocaleString('pt-BR', { month: 'short' }).replace('.', '');
+            const year = d.getFullYear();
+            return `${day} ${month.charAt(0).toUpperCase() + month.slice(1)} ${year}`;
+        } catch { return dateStr; }
     };
 
     return (
         <div className="lg:col-span-2 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col">
             <div className="p-4 md:p-6 border-b border-slate-100 dark:border-slate-700 flex flex-wrap justify-between items-center gap-3">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">Histórico de Aplicações</h3>
-                <div className="flex flex-wrap gap-2">
-                    <button
-                        onClick={onAddHistorical}
-                        className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800 transition-colors flex items-center gap-1.5"
-                    >
-                        <span className="material-symbols-outlined text-sm">history</span>
-                        <span>Adicionar Dose Histórica</span>
-                    </button>
-                    <button
-                        onClick={() => {
-                            // Generate CSV from injections
-                            const headers = ['Data', 'Dosagem', 'Status'];
-                            const rows = injections.map(inj => [
-                                inj.date,
-                                `${inj.dosage} mg`,
-                                inj.status
-                            ]);
-
-                            const csvContent = [
-                                headers.join(','),
-                                ...rows.map(row => row.join(','))
-                            ].join('\n');
-
-                            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                            const link = document.createElement('a');
-                            link.href = URL.createObjectURL(blob);
-                            link.download = `historico_aplicacoes_${new Date().toISOString().split('T')[0]}.csv`;
-                            link.click();
-                        }}
-                        className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5"
-                    >
-                        <span className="material-symbols-outlined text-sm">download</span>
-                        <span>Exportar CSV</span>
-                    </button>
-                </div>
+                {!readonly && (
+                    <div className="flex flex-wrap gap-2">
+                        <button onClick={onAddHistorical} className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 border border-amber-200 transition-colors flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-sm">history</span><span>Adicionar Dose Histórica</span>
+                        </button>
+                    </div>
+                )}
             </div>
-
             <div className="flex-1 overflow-x-auto">
                 {injections.length === 0 ? (
-                    <div className="p-12 text-center text-slate-400">
-                        Nenhuma aplicação registrada
-                    </div>
+                    <div className="p-12 text-center text-slate-400">Nenhuma aplicação registrada</div>
                 ) : (
                     <div className="divide-y divide-slate-100 dark:divide-slate-700">
                         {injections.map((injection, index) => (
                             <div key={index} className="transition-colors">
-                                {/* Compact Row - Always Visible */}
-                                <div
-                                    onClick={() => toggleRow(index)}
-                                    className={`px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30 cursor-pointer transition-all ${highlightedDate === injection.applicationDate
-                                        ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500'
-                                        : ''
-                                        }`}
-                                >
+                                <div onClick={() => setExpandedRow(expandedRow === index ? null : index)} className={`px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30 cursor-pointer transition-all ${highlightedDate === injection.applicationDate ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}>
                                     <div className="grid grid-cols-[1fr,auto,auto,auto] md:grid-cols-[1.5fr,1fr,auto,auto] gap-3 items-center">
-                                        {/* Date */}
                                         <div className="flex items-center gap-2 min-w-0">
-                                            {injection.isHistorical && (
-                                                <span className="material-symbols-outlined text-amber-500 text-sm flex-shrink-0" title="Dose histórica">history</span>
-                                            )}
-                                            <div className="min-w-0">
-                                                <div className="text-sm font-medium text-slate-900 dark:text-white truncate">
-                                                    {formatAestheticDate(injection.date)}
-                                                </div>
-                                            </div>
-                                            <button
-                                                className="ml-auto text-slate-400 transition-transform"
-                                                style={{ transform: expandedRow === index ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                                            >
-                                                <span className="material-symbols-outlined text-lg">expand_more</span>
-                                            </button>
+                                            {injection.isHistorical && <span className="material-symbols-outlined text-amber-500 text-sm flex-shrink-0" title="Dose histórica">history</span>}
+                                            <div className="min-w-0"><div className="text-sm font-medium text-slate-900 dark:text-white truncate">{formatAestheticDate(injection.date)}</div></div>
+                                            <button className="ml-auto text-slate-400 transition-transform" style={{ transform: expandedRow === index ? 'rotate(180deg)' : 'rotate(0deg)' }}><span className="material-symbols-outlined text-lg">expand_more</span></button>
                                         </div>
-
-                                        {/* Dosagem */}
-                                        <div className="text-sm font-semibold text-slate-900 dark:text-white text-center">
-                                            {injection.dosage}
-                                        </div>
-
-                                        {/* Payment Badge */}
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onTogglePayment(injection);
-                                            }}
-                                            className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ring-1 ring-inset transition-all ${injection.isPaid
-                                                ? 'bg-green-50 text-green-700 ring-green-600/20 hover:bg-green-100'
-                                                : 'bg-slate-100 text-slate-500 ring-slate-300 hover:bg-slate-200'
-                                                }`}
-                                        >
-                                            <span className="material-symbols-outlined text-xs">
-                                                {injection.isPaid ? 'check_circle' : 'radio_button_unchecked'}
-                                            </span>
-                                            <span className="hidden sm:inline">{injection.isPaid ? 'Pago' : 'Pendente'}</span>
+                                        <div className="text-sm font-semibold text-slate-900 dark:text-white text-center">{injection.dosage}</div>
+                                        <button onClick={(e) => { if (readonly) return; e.stopPropagation(); onTogglePayment(injection); }} className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ring-1 ring-inset transition-all ${injection.isPaid ? 'bg-green-50 text-green-700 ring-green-600/20' : 'bg-slate-100 text-slate-500 ring-slate-300'} ${!readonly ? 'hover:bg-opacity-80' : 'cursor-default opacity-80'}`}>
+                                            <span className="material-symbols-outlined text-xs">{injection.isPaid ? 'check_circle' : 'radio_button_unchecked'}</span><span className="hidden sm:inline">{injection.isPaid ? 'Pago' : 'Pendente'}</span>
                                         </button>
-
-                                        {/* Status Badge */}
-                                        <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-bold ring-1 ring-inset ${injection.status === 'Aplicada' ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20' : 'bg-slate-50 text-slate-700 ring-slate-600/20'}`}>
-                                            {injection.status}
-                                        </span>
+                                        <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-bold ring-1 ring-inset ${injection.status === 'Aplicada' ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20' : 'bg-slate-50 text-slate-700 ring-slate-600/20'}`}>{injection.status}</span>
                                     </div>
                                 </div>
-
-                                {/* Expanded Details */}
                                 {expandedRow === index && (
-                                    <div className="px-4 py-4 bg-gradient-to-br from-slate-50/80 to-slate-100/50 dark:from-slate-800/20 dark:to-slate-900/20 border-t border-slate-200 dark:border-slate-700 animate-in slide-in-from-top-2 duration-200">
+                                    <div className="px-4 py-4 bg-gradient-to-br from-slate-50/80 to-slate-100/50 dark:from-slate-800/20 dark:to-slate-900/20 border-t border-slate-200 dark:border-slate-700 animate-in slide-in-from-top-2">
                                         <div className="space-y-3">
-                                            {/* Dosage Card */}
-                                            <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="material-symbols-outlined text-blue-500 text-lg">medication</span>
-                                                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">Dosagem</span>
-                                                    </div>
-                                                    <span className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-lg font-bold text-blue-600 dark:text-blue-400">
-                                                        {injection.dosage}
-                                                    </span>
-                                                </div>
+                                            <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                                                <div className="flex items-center gap-2"><span className="material-symbols-outlined text-lg text-slate-500">payments</span><span className="text-xs font-semibold text-slate-600 uppercase">Valor</span></div>
+                                                <span className="text-lg font-mono font-bold text-slate-900 dark:text-white">{formatCurrency(injection.doseValue || 0)}</span>
                                             </div>
-
-                                            {/* Financial Card */}
-                                            <div className={`p-3 rounded-lg border ${injection.isPaid ? 'bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10 border-emerald-200 dark:border-emerald-700' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`material-symbols-outlined text-lg ${injection.isPaid ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}`}>
-                                                            {injection.isPaid ? 'check_circle' : 'payments'}
-                                                        </span>
-                                                        <div>
-                                                            <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide block">Valor</span>
-                                                            {injection.isPaid && (
-                                                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Pagamento confirmado</span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    <span className={`text-lg font-mono font-bold ${injection.isPaid ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-900 dark:text-white'}`}>
-                                                        {formatCurrency(injection.doseValue || 0)}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            {/* Notes Card */}
-                                            {injection.notes && (
-                                                <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-                                                    <div className="flex items-start gap-2 mb-2">
-                                                        <span className="material-symbols-outlined text-amber-500 text-sm mt-0.5">sticky_note_2</span>
-                                                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">Observações</span>
-                                                    </div>
-                                                    <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed pl-6">
-                                                        {injection.notes}
-                                                    </p>
+                                            {injection.notes && <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200"><p className="text-sm text-slate-700">{injection.notes}</p></div>}
+                                            {!readonly && (
+                                                <div className="grid grid-cols-2 gap-2 pt-1">
+                                                    <button onClick={(e) => { e.stopPropagation(); onEdit(injection); }} className="px-3 py-2 bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2"><span className="material-symbols-outlined text-sm">edit</span> Editar</button>
+                                                    <button onClick={(e) => { e.stopPropagation(); injection.id && onDelete(injection.id, injection); }} className="px-3 py-2 bg-red-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2"><span className="material-symbols-outlined text-sm">delete</span> Excluir</button>
                                                 </div>
                                             )}
-
-                                            {/* Action Buttons */}
-                                            <div className="grid grid-cols-2 gap-2 pt-1">
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onEdit(injection);
-                                                    }}
-                                                    className="px-3 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-all flex items-center justify-center gap-2 font-semibold text-sm shadow-sm hover:shadow active:scale-95"
-                                                >
-                                                    <span className="material-symbols-outlined text-base">edit</span>
-                                                    Editar
-                                                </button>
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        injection.id && onDelete(injection.id, injection);
-                                                    }}
-                                                    className="px-3 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all flex items-center justify-center gap-2 font-semibold text-sm shadow-sm hover:shadow active:scale-95"
-                                                >
-                                                    <span className="material-symbols-outlined text-base">delete</span>
-                                                    Excluir
-                                                </button>
-                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -477,28 +212,18 @@ const InjectionHistoryTable: React.FC<{
     );
 };
 
-
-
-interface PatientProfilePageProps {
-    patient: Patient;
-    onBack: () => void;
-    onGoHome: () => void;
-}
-
-const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack, onGoHome }) => {
+// --- COMPONENTE PRINCIPAL ---
+const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoHome: () => void, readonly?: boolean }> = ({ patient, onBack, onGoHome, readonly = false }) => {
     const [realPatient, setRealPatient] = useState<Patient>(patient);
     const [medicationSteps, setMedicationSteps] = useState<MedicationStep[]>([]);
     const [injections, setInjections] = useState<Injection[]>([]);
     const [loading, setLoading] = useState(true);
-    const [totalPaid, setTotalPaid] = useState(0);
     const [paidStepIds, setPaidStepIds] = useState<Set<string>>(new Set());
-
-    // Manual Weights State
     const [manualWeights, setManualWeights] = useState<any[]>([]);
+
+    // Modais
     const [isAddWeightModalOpen, setIsAddWeightModalOpen] = useState(false);
     const [weightToDelete, setWeightToDelete] = useState<{ id: string, weight: number, date: Date } | null>(null);
-
-    // Modals state
     const [isEditStepModalOpen, setIsEditStepModalOpen] = useState(false);
     const [selectedStep, setSelectedStep] = useState<MedicationStep | null>(null);
     const [isEditPatientModalOpen, setIsEditPatientModalOpen] = useState(false);
@@ -518,552 +243,86 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            // 1. Fetch Patient
-            const { data: patientData } = await supabase
-                .from('patients')
-                .select('*')
-                .eq('id', patient.id)
-                .single();
-
-            // ... (keep existing patient data setting) ...
+            const { data: patientData } = await supabase.from('patients').select('*').eq('id', patient.id).single();
             if (patientData) {
-                // ... (reconstruct realPatient state) ...
                 setRealPatient({
-                    id: patientData.id,
-                    name: patientData.name,
-                    initials: patientData.initials,
-                    age: patientData.age,
-                    gender: patientData.gender,
-                    avatarUrl: patientData.avatar_url,
-                    currentWeight: patientData.current_weight,
-                    initialWeight: patientData.initial_weight || patientData.current_weight,
-                    weightChange: patientData.weight_change || 0,
-                    bmi: patientData.bmi,
-                    bmiCategory: patientData.bmi_category,
-                    targetWeight: patientData.target_weight,
-                    height: patientData.height
+                    id: patientData.id, name: patientData.name, initials: patientData.initials, age: patientData.age, gender: patientData.gender,
+                    avatarUrl: patientData.avatar_url, currentWeight: patientData.current_weight, initialWeight: patientData.initial_weight,
+                    weightChange: patientData.weight_change, bmi: patientData.bmi, bmiCategory: patientData.bmi_category, targetWeight: patientData.target_weight, height: patientData.height
                 });
             }
-
-            // 2. Fetch Medication Steps (keep existing)
-            const { data: stepsData } = await supabase
-                .from('medication_steps')
-                .select('*')
-                .eq('patient_id', patient.id)
-                .order('order_index', { ascending: true });
+            const { data: stepsData } = await supabase.from('medication_steps').select('*').eq('patient_id', patient.id).order('order_index', { ascending: true });
             setMedicationSteps(stepsData || []);
-
-            // 3. Fetch Injections (keep existing)
-            const { data: injectionsData } = await supabase
-                .from('injections')
-                .select('*')
-                .eq('patient_id', patient.id)
-                .order('created_at', { ascending: false });
-
-            // ... (keep existing formatting logic for injections) ...
-            const formattedInjections = (injectionsData || []).map(inj => {
-                const dateSource = inj.applied_at || inj.created_at;
-                const datePart = typeof dateSource === 'string' ? dateSource.split('T')[0] : '';
-                // Simple Date Parsing Logic
-                let date;
-                if (datePart) {
-                    const [y, m, d] = datePart.split('-').map(Number);
-                    date = new Date(y, m - 1, d, 12, 0, 0);
-                } else {
-                    date = new Date(dateSource);
-                }
-
-                return {
-                    id: inj.id,
-                    date: date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }),
-                    day: date.toLocaleDateString('pt-BR', { weekday: 'long' }).replace(/^\w/, c => c.toUpperCase()),
-                    dosage: inj.dosage,
-                    notes: inj.notes,
-                    status: inj.status === 'Applied' ? 'Aplicada' : 'Pulada',
-                    doseValue: inj.dose_value || 0,
-                    applicationDate: datePart, // YYYY-MM-DD
-                    isPaid: inj.is_paid || false,
-                    patient_id: inj.patient_id,
-                    patientWeightAtInjection: inj.patient_weight_at_injection,
-                    medicationId: inj.medication_id
-                } as Injection;
-            });
+            const { data: injectionsData } = await supabase.from('injections').select('*').eq('patient_id', patient.id).order('created_at', { ascending: false });
+            const formattedInjections = (injectionsData || []).map(inj => ({
+                id: inj.id, date: (typeof inj.applied_at === 'string' ? inj.applied_at.split('T')[0] : '') || '', dosage: inj.dosage, notes: inj.notes,
+                status: inj.status === 'Applied' ? 'Aplicada' : 'Pulada', doseValue: inj.dose_value || 0, applicationDate: (typeof inj.applied_at === 'string' ? inj.applied_at.split('T')[0] : ''),
+                isPaid: inj.is_paid || false, patient_id: inj.patient_id, patientWeightAtInjection: inj.patient_weight_at_injection, medicationId: inj.medication_id, isHistorical: inj.is_historical
+            } as Injection));
             setInjections(formattedInjections);
-
-            // 4. NEW: Fetch Manual Weights
-            const { data: weightData } = await supabase
-                .from('weight_measurements')
-                .select('*')
-                .eq('patient_id', patient.id)
-                .order('date', { ascending: true });
-
+            const { data: weightData } = await supabase.from('weight_measurements').select('*').eq('patient_id', patient.id).order('date', { ascending: true });
             setManualWeights(weightData || []);
-
-
-            // ... (keep existing payments fetch) ...
-            const { data: paymentsData } = await supabase
-                .from('financial_records')
-                .select('amount')
-                .eq('patient_id', patient.id)
-                .eq('status', 'Paid');
-
-            const paidSum = (paymentsData || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-            setTotalPaid(paidSum);
-
-            const paidIds = new Set<string>();
-            formattedInjections.forEach(inj => {
-                if (inj.isPaid && inj.id) paidIds.add(inj.id);
-            });
-            setPaidStepIds(paidIds);
-
+            const newPaidIds = new Set<string>();
+            formattedInjections.forEach(inj => { if (inj.isPaid && inj.id) newPaidIds.add(inj.id); });
+            setPaidStepIds(newPaidIds);
             setLoading(false);
-        } catch (err) {
-            console.error('Error fetching profile data:', err);
-            setLoading(false);
-        }
+        } catch (err) { setLoading(false); }
     }, [patient.id]);
 
-    useEffect(() => {
-        fetchData();
+    useEffect(() => { fetchData(); const h = () => fetchData(); window.addEventListener('global-dose-added', h); return () => window.removeEventListener('global-dose-added', h); }, [fetchData]);
 
-        // Listen for global dose updates (from top bar button)
-        const handleGlobalUpdate = () => {
-            fetchData();
-        };
-
-        window.addEventListener('global-dose-added', handleGlobalUpdate);
-        return () => {
-            window.removeEventListener('global-dose-added', handleGlobalUpdate);
-        };
-    }, [fetchData]);
-
-    // Calculate financial totals
-    const { totalDosesValue, doseCount, paidDoseCount, totalPaidFromDoses } = useMemo(() => {
-        const total = injections.reduce((sum, inj) => sum + (inj.doseValue || 0), 0);
-        const paidCount = injections.filter(inj => inj.isPaid).length;
-        const paidValue = injections.filter(inj => inj.isPaid).reduce((sum, inj) => sum + (inj.doseValue || 0), 0);
-        return { totalDosesValue: total, doseCount: injections.length, paidDoseCount: paidCount, totalPaidFromDoses: paidValue };
-    }, [injections]);
-
-    // Prepare Unified Weight History for Chart
     const weightHistory: WeightDataPoint[] = useMemo(() => {
-        const history: WeightDataPoint[] = [];
-
-        // 1. Initial Weight
-        // (Handled by chart internal logic relative to patient prop, or implicit)
-
-        // 2. Collect ALL weights first
         const rawPoints: WeightDataPoint[] = [];
+        injections.forEach(inj => { if (inj.patientWeightAtInjection) rawPoints.push({ date: new Date(inj.applicationDate), weight: inj.patientWeightAtInjection, source: 'injection', label: inj.date }); });
+        manualWeights.forEach(mw => { rawPoints.push({ id: mw.id, date: new Date(mw.date), weight: mw.weight, source: 'manual', label: mw.date }); });
+        return rawPoints.sort((a, b) => a.date.getTime() - b.date.getTime());
+    }, [injections, manualWeights]);
 
-        // From Injections
-        injections.forEach(inj => {
-            if (inj.patientWeightAtInjection) {
-                rawPoints.push({
-                    date: new Date(inj.applicationDate), // YYYY-MM-DD
-                    weight: inj.patientWeightAtInjection,
-                    source: 'injection',
-                    label: inj.date
-                });
-            }
-        });
-
-        // From Manual
-        manualWeights.forEach(mw => {
-            const [y, m, d] = mw.date.split('-').map(Number);
-            const dateObj = new Date(y, m - 1, d, 12, 0, 0);
-
-            rawPoints.push({
-                id: mw.id,
-                date: dateObj,
-                weight: mw.weight,
-                source: 'manual',
-                label: dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
-            });
-        });
-
-        // 3. Deduplicate / Prioritize per Day
-        // Map: 'YYYY-MM-DD' -> WeightDataPoint
-        const dayMap = new Map<string, WeightDataPoint>();
-
-        rawPoints.forEach(point => {
-            const dateKey = point.date.toISOString().split('T')[0];
-            const existing = dayMap.get(dateKey);
-
-            if (!existing) {
-                dayMap.set(dateKey, point);
-            } else {
-                // Conflict resolution: Manual > Injection
-                if (point.source === 'manual') {
-                    // Always overwrite with manual
-                    dayMap.set(dateKey, point);
-                } else if (point.source === 'injection') {
-                    // Only overwrite if existing is NOT manual (i.e., if existing is another injection?? or initial)
-                    if (existing.source !== 'manual') {
-                        dayMap.set(dateKey, point);
-                    }
-                }
-            }
-        });
-
-        return Array.from(dayMap.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
-    }, [injections, manualWeights, realPatient.initialWeight]);
-
-    // Derived Display Values (Sync with Chart)
-    const { displayCurrentWeight, displayWeightChange, displayTotalLost, displayBMI, displayProgressPercent, isSuperResponder } = useMemo(() => {
-        if (weightHistory.length === 0) {
-            return {
-                displayCurrentWeight: realPatient.currentWeight || 0,
-                displayWeightChange: realPatient.weightChange || 0,
-                displayTotalLost: 0,
-                displayBMI: realPatient.bmi || 0,
-                displayProgressPercent: 0,
-                isSuperResponder: false
-            };
-        }
-
-        const latestPoint = weightHistory[weightHistory.length - 1]; // Sorted ASC, so last is newest
-        const current = latestPoint.weight;
-        const initial = realPatient.initialWeight || current;
-        const target = realPatient.targetWeight || 0;
-
-        const change = current - initial;
-        const totalLost = initial - current;
-
-        // Calculate BMI
-        const heightM = (realPatient.height || 0) / 100; // cm to m
-        const bmi = heightM > 0 ? parseFloat((current / (heightM * heightM)).toFixed(1)) : 0;
-
-        // Calculate Progress %
-        let progress = 0;
-        if (target && initial) {
-            const totalToLose = initial - target;
-            const lostSoFar = initial - current;
-            if (totalToLose > 0) {
-                progress = Math.min(100, Math.max(0, (lostSoFar / totalToLose) * 100));
-            }
-        }
-
-        // Check Super Responder Status
-        let isSuperResponder = false;
-        if (latestPoint && initial) {
-            const startDate = weightHistory[0].date.getTime();
-            const daysActive = (latestPoint.date.getTime() - startDate) / (1000 * 60 * 60 * 24);
-            const currentWeek = daysActive / 7;
-
-            const gender = realPatient.gender === 'Male' ? 'Male' : 'Female';
-            const zones = CLINICAL_ZONES[gender];
-
-            let maxLossPercent = 0;
-            if (currentWeek > 0) {
-                // Simple linear interpolation for limit
-                let w1 = zones[0];
-                let w2 = zones[zones.length - 1];
-
-                for (let i = 0; i < zones.length - 1; i++) {
-                    if (currentWeek >= zones[i].week && currentWeek <= zones[i + 1].week) {
-                        w1 = zones[i];
-                        w2 = zones[i + 1];
-                        break;
-                    }
-                }
-
-                const weekRange = w2.week - w1.week;
-                const progressInBracket = (currentWeek - w1.week) / (weekRange || 1);
-                maxLossPercent = w1.maxLoss + (w2.maxLoss - w1.maxLoss) * progressInBracket;
-
-                // Cap at week 16 max loss if beyond
-                if (currentWeek > 16) maxLossPercent = zones[zones.length - 1].maxLoss;
-
-                const expectedWeight = initial * (1 - (maxLossPercent / 100));
-
-                // Rule: Must be at least 4 weeks in to count (avoid honeymoon phase false positives)
-                if (currentWeek >= 4 && current < expectedWeight) isSuperResponder = true;
-            }
-        }
-
-        return {
-            displayCurrentWeight: current,
-            displayWeightChange: change, // Negative means lost
-            displayTotalLost: totalLost > 0 ? totalLost : 0, // Positive value for "kg elim."
-            displayBMI: bmi,
-            displayProgressPercent: progress,
-            isSuperResponder
-        };
-    }, [weightHistory, realPatient.initialWeight, realPatient.currentWeight, realPatient.targetWeight, realPatient.height, realPatient.bmi, realPatient.weightChange]);
-
-
-    // Build Journey Steps Dynamically from History + Plan
     const journeySteps: MedicationStep[] = useMemo(() => {
-        // 1. Past Steps from Injections (Source of Truth)
-        // Injections are sorted Newest -> Oldest in state. Reverse for Journey (1st -> Last)
-        const pastSteps = [...injections].sort((a, b) => new Date(a.applicationDate).getTime() - new Date(b.applicationDate).getTime()).map((inj, index) => ({
-            id: inj.id,
-            dosage: inj.dosage,
-            status: 'Concluído' as const, // Injections are by definition applied
-            details: inj.date, // Display date as detail
-            recordedWeight: inj.patientWeightAtInjection,
-            date: inj.date,
-            // Link to injection for edit? The component logic handles editing differently...
-            // But we can pass the injection ID if needed.
-        }));
-
-        // 2. Future Steps from MedicationSteps table (The Plan)
-        // Filter out any step that is marked 'Concluído' because we replaced them with actual history.
-        // We only want 'Atual' (if not yet in history?), 'Bloqueado', 'Pulada'.
-        // Actually, 'Atual' might be the *next* dose.
-        const futureSteps = medicationSteps.filter(s => s.status !== 'Concluído');
-
-        return [...pastSteps, ...futureSteps];
+        const past = injections.map(inj => ({ id: inj.id, dosage: inj.dosage, status: 'Concluído' as const, date: inj.date, recordedWeight: inj.patientWeightAtInjection, _sortDate: inj.applicationDate }));
+        const future = medicationSteps.filter(s => s.status !== 'Concluído').map(s => ({ ...s, _sortDate: s.date || '9999-12-31' }));
+        return [...past, ...future].sort((a, b) => (a._sortDate || '').localeCompare(b._sortDate || '')).map(({ _sortDate, ...step }) => step as MedicationStep);
     }, [injections, medicationSteps]);
 
-    const handleEditStep = (step: MedicationStep) => {
-        // If it's a past step (from injection), we should edit the INJECTION
-        if (step.status === 'Concluído' && step.id && injections.some(i => i.id === step.id)) {
-            const injectionsToEdit = injections.find(i => i.id === step.id);
-            if (injectionsToEdit) {
-                handleEditInjection(injectionsToEdit);
-                return;
-            }
-        }
+    const isSuperResponder = useMemo(() => {
+        if (!weightHistory.length) return false;
+        const latest = weightHistory[weightHistory.length - 1];
+        const initial = realPatient.initialWeight || latest.weight;
+        const days = (latest.date.getTime() - weightHistory[0].date.getTime()) / (1000 * 60 * 60 * 24);
+        return (days / 7 >= 4) && (latest.weight < initial * 0.90);
+    }, [weightHistory, realPatient]);
 
-        // Otherwise edit as step (Plan)
-        setSelectedStep(step);
-        setIsEditStepModalOpen(true);
-    };
+    // Handlers
+    const handleEditStep = (step: MedicationStep) => { if (readonly) return; setSelectedStep(step); setIsEditStepModalOpen(true); };
+    const handleDeleteStep = (step: MedicationStep) => { if (readonly) return; setStepToDelete(step); setIsConfirmDeleteModalOpen(true); };
+    const handleAddStep = () => { setSelectedStep(null); setIsEditStepModalOpen(true); };
+    const handleEditInjection = (injection: Injection) => { setSelectedInjectionForEdit(injection); setIsEditDoseModalOpen(true); };
+    const handlePaymentClick = (step: MedicationStep) => { if (step.status === 'Concluído' && step.id && injections.some(i => i.id === step.id)) return; setSelectedStepForPayment(step); setIsPaymentModalOpen(true); };
+    const confirmDeleteStep = async () => { if (!stepToDelete || !stepToDelete.id) return; if (stepToDelete.status === 'Concluído') await supabase.from('injections').delete().eq('id', stepToDelete.id); else await supabase.from('medication_steps').delete().eq('id', stepToDelete.id); setIsConfirmDeleteModalOpen(false); fetchData(); setStepToDelete(null); };
+    const confirmDelete = async () => { if (!injectionToDelete) return; await supabase.from('injections').delete().eq('id', injectionToDelete.id); setIsConfirmDeleteModalOpen(false); setInjectionToDelete(null); fetchData(); };
 
-    const handleDeleteStep = (step: MedicationStep) => {
-        setStepToDelete(step);
-        setIsConfirmDeleteModalOpen(true);
-    };
-
-    const confirmDeleteStep = async () => {
-        if (!stepToDelete || !stepToDelete.id) return;
-
-        try {
-            // Check if it's a real injection (history) or just a plan
-            // If it's history (Concluído), we might need to delete from 'injections' table?
-            // "cancelar a etapa" usually implies future.
-            // If the user tries to delete a "Concluído" step that comes from 'injections', the ID should be the injection ID.
-            // My 'journeySteps' logic sets ID = injection.id for past steps.
-
-            if (stepToDelete.status === 'Concluído') {
-                // It's an injection
-                const { error } = await supabase
-                    .from('injections')
-                    .delete()
-                    .eq('id', stepToDelete.id);
-                if (error) throw error;
-            } else {
-                // It's a planned step
-                const { error } = await supabase
-                    .from('medication_steps')
-                    .delete()
-                    .eq('id', stepToDelete.id);
-                if (error) throw error;
-            }
-
-            // Refresh
-            fetchData();
-            setIsConfirmDeleteModalOpen(false);
-            setStepToDelete(null);
-        } catch (error) {
-            console.error('Error deleting step:', error);
-            alert('Erro ao excluir etapa. Tente novamente.');
-        }
-    };
-
-    const handleAddStep = () => {
-        setSelectedStep(null);
-        setIsEditStepModalOpen(true);
-    };
-
-    const handleDeleteInjection = (id: string, injection: Injection) => {
-        // Open custom confirmation modal
-        setInjectionToDelete({
-            id,
-            name: `${injection.dosage} - ${injection.date}`
-        });
-        setIsConfirmDeleteModalOpen(true);
-    };
-
-    // Helper to recalculate weight based on all history
-    const recalculateAndSavePatientWeight = async (patientId: string) => {
-        try {
-            // 1. Fetch Manual Weights (include created_at for tie-breaking)
-            const { data: manualData } = await supabase
-                .from('weight_measurements')
-                .select('weight, date, created_at')
-                .eq('patient_id', patientId);
-
-            // 2. Fetch Injection Weights
-            const { data: injectionData } = await supabase
-                .from('injections')
-                .select('patient_weight_at_injection, application_date, created_at')
-                .eq('patient_id', patientId)
-                .not('patient_weight_at_injection', 'is', null);
-
-            // 3. Merge and Sort descending by DATE, then by CREATED_AT
-            const allWeights = [
-                ...(manualData || []).map(m => ({
-                    weight: m.weight,
-                    date: m.date,
-                    created_at: m.created_at
-                })),
-                ...(injectionData || []).map(i => ({
-                    weight: i.patient_weight_at_injection,
-                    date: i.application_date || i.created_at, // Accessing date field
-                    created_at: i.created_at
-                }))
-            ].sort((a, b) => {
-                const dateA = new Date(a.date).getTime();
-                const dateB = new Date(b.date).getTime();
-                if (dateA !== dateB) {
-                    return dateB - dateA; // Descending Date
-                }
-                // If same date, prefer newer record (Created At)
-                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-            });
-
-            // 4. Determine New Current Weight
-            if (allWeights.length > 0) {
-                const latest = allWeights[0];
-                const newCurrent = latest.weight;
-                const newChange = newCurrent - (realPatient.initialWeight || newCurrent);
-
-                // 5. Update Patient Table
-                const { error } = await supabase
-                    .from('patients')
-                    .update({
-                        current_weight: newCurrent,
-                        weight_change: newChange
-                    })
-                    .eq('id', patientId);
-
-                if (!error) {
-                    // Update local state immediately to reflect change
-                    setRealPatient(prev => ({
-                        ...prev,
-                        currentWeight: newCurrent,
-                        weightChange: newChange
-                    }));
-                }
-
-            } else {
-                if (realPatient.initialWeight) {
-                    await supabase.from('patients').update({
-                        current_weight: realPatient.initialWeight,
-                        weight_change: 0
-                    }).eq('id', patientId);
-
-                    setRealPatient(prev => ({
-                        ...prev,
-                        currentWeight: prev.initialWeight || 0,
-                        weightChange: 0
-                    }));
-                }
-            }
-
-        } catch (err) {
-            console.error("Error recalculating weight:", err);
-        }
-    };
-
-    const confirmDelete = async () => {
-        if (!injectionToDelete) return;
-
-        setIsDeleting(true);
-        try {
-            const { error } = await supabase.from('injections').delete().eq('id', injectionToDelete.id);
-            if (error) throw error;
-
-            // Recalculate weight
-            await recalculateAndSavePatientWeight(patient.id);
-
-            setIsConfirmDeleteModalOpen(false);
-            setInjectionToDelete(null);
-
-            requestAnimationFrame(() => {
-                fetchData();
-            });
-        } catch (err) {
-            alert('Erro ao excluir aplicação');
-        } finally {
-            setIsDeleting(false);
-        }
-    };
-
-    const handleTogglePayment = async (injection: Injection) => {
-        if (!injection.id) return;
-
-        const newStatus = !injection.isPaid;
-
-        // Optimistic update
-        setInjections(prev => prev.map(i => i.id === injection.id ? { ...i, isPaid: newStatus } : i));
-
-        try {
-            await supabase
-                .from('injections')
-                .update({ is_paid: newStatus })
-                .eq('id', injection.id);
-
-            // Also manage financial record? The modal does it... simplify for toggle
-        } catch (e) {
-            fetchData(); // Revert
-        }
-    };
-
-    const handleEditPatient = () => {
-        setIsEditPatientModalOpen(true);
-    };
-
-    const handleAddHistoricalDose = () => {
-        setIsHistoricalDoseModalOpen(true);
-    };
-
-    const handleEditInjection = (injection: Injection) => {
-        setSelectedInjectionForEdit(injection);
-        setIsEditDoseModalOpen(true);
-    };
-
-    const handlePaymentClick = (step: MedicationStep) => {
-        // If it's a past step, open payment for injection
-        if (step.status === 'Concluído' && step.id && injections.some(i => i.id === step.id)) {
-            const injectionsToEdit = injections.find(i => i.id === step.id);
-            if (injectionsToEdit) {
-                handleTogglePayment(injectionsToEdit);
-                return;
-            }
-        }
-        // Future steps payment logic? Usually we pay for done things.
-        setSelectedStepForPayment(step);
-        setIsPaymentModalOpen(true);
-    };
-
-    if (loading && medicationSteps.length === 0) {
-        return <div className="p-20 text-center text-slate-500">Carregando perfil...</div>;
-    }
+    if (loading && medicationSteps.length === 0) return <div className="p-20 text-center text-slate-500">Carregando perfil...</div>;
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-20 md:pb-0">
-            <div className="max-w-6xl mx-auto flex items-center gap-2 text-sm text-slate-500 pt-8 px-4">
-                <a href="#" onClick={(e) => { e.preventDefault(); onGoHome(); }} className="hover:underline opacity-60">Home</a>
-                <span className="material-symbols-outlined text-base opacity-60">chevron_right</span>
-                <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }} className="hover:underline">Pacientes</a>
-                <span className="material-symbols-outlined text-base">chevron_right</span>
-                <span className="font-medium text-slate-900 dark:text-white">{realPatient.name}</span>
-            </div>
+            {/* Header escondido se readonly */}
+            {!readonly && (
+                <div className="max-w-6xl mx-auto flex items-center gap-2 text-sm text-slate-500 pt-8 px-4">
+                    <a href="#" onClick={(e) => { e.preventDefault(); onGoHome(); }} className="hover:underline opacity-60">Home</a>
+                    <span className="material-symbols-outlined text-base opacity-60">chevron_right</span>
+                    <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }} className="hover:underline">Pacientes</a>
+                    <span className="material-symbols-outlined text-base">chevron_right</span>
+                    <span className="font-medium text-slate-900 dark:text-white">{realPatient.name}</span>
+                </div>
+            )}
 
             <main className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+                {/* Banner */}
                 <section className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-900 rounded-xl shadow-sm border border-blue-100 dark:border-slate-700 p-4 md:p-6 mb-4 md:mb-6">
-                    <div className="flex flex-col md:flex-row md:items-center gap-4 md:justify-between">
+                    <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
                         <div className="flex items-center gap-4">
                             <div className="relative w-16 h-16 md:w-20 md:h-20 flex-shrink-0">
-                                <div className="w-full h-full rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-2xl md:text-3xl font-bold shadow-lg">
-                                    {realPatient.name.charAt(0)}
-                                </div>
-                                <div className="absolute -bottom-1 -right-1 bg-green-500 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 md:border-4 border-white dark:border-slate-800 flex items-center justify-center">
-                                    <span className="material-symbols-outlined text-white text-xs md:text-sm">check</span>
-                                </div>
+                                <div className="w-full h-full rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-2xl font-bold shadow-lg">{realPatient.name.charAt(0)}</div>
                             </div>
                             <div className="min-w-0">
                                 <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white truncate">{realPatient.name}</h2>
@@ -1071,307 +330,62 @@ const PatientProfilePage: React.FC<PatientProfilePageProps> = ({ patient, onBack
                                     <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">cake</span> {realPatient.age} anos</span>
                                     <span>•</span>
                                     <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">{realPatient.gender === 'Female' ? 'female' : 'male'}</span> {realPatient.gender === 'Female' ? 'Feminino' : 'Masculino'}</span>
-
-                                    {isSuperResponder && (
-                                        <>
-                                            <span>•</span>
-                                            <div className="bg-gradient-to-r from-amber-300 to-orange-400 text-amber-900 border border-amber-200 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm flex items-center gap-1 animate-in fade-in zoom-in duration-500">
-                                                <span className="material-symbols-outlined text-sm font-bold">bolt</span>
-                                                <span>Super Responder</span>
-                                            </div>
-                                        </>
-                                    )}
                                 </div>
                             </div>
                         </div>
+                        {isSuperResponder && <div className="self-start md:self-center ml-auto"><div className="bg-gradient-to-r from-amber-300 to-orange-400 text-amber-900 border border-amber-200 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-sm flex items-center gap-1 animate-in fade-in zoom-in duration-500"><span className="material-symbols-outlined text-sm font-bold">bolt</span><span>Super Responder</span></div></div>}
                     </div>
                 </section>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
-                    {/* Weight Card */}
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl p-3 md:p-4 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
-                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                            <span className="material-symbols-outlined text-4xl text-blue-500">monitor_weight</span>
-                        </div>
-                        <p className="text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 md:mb-2">Peso Atual</p>
-                        <div className="flex items-baseline gap-1">
-                            <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{displayCurrentWeight}</span>
-                            <span className="text-sm font-medium text-slate-500">kg</span>
-                        </div>
-                        <div className={`text-xs font-medium mt-2 flex items-center gap-1 ${displayWeightChange <= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                            <span className="material-symbols-outlined text-base">{displayWeightChange <= 0 ? 'trending_down' : 'trending_up'}</span>
-                            <span>{Math.abs(Number(displayWeightChange.toFixed(1)))} kg {displayWeightChange <= 0 ? 'perdidos' : 'ganhos'}</span>
-                        </div>
-                    </div>
-
-                    {/* Target Weight Card */}
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
-                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                            <span className="material-symbols-outlined text-4xl text-purple-500">flag</span>
-                        </div>
-                        <p className="text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 md:mb-2">Meta</p>
-                        <div className="flex items-baseline gap-1">
-                            <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{realPatient.targetWeight || '--'}</span>
-                            <span className="text-sm font-medium text-slate-500">kg</span>
-                        </div>
-                        {realPatient.targetWeight && displayCurrentWeight && (
-                            <div className="text-xs font-medium mt-2 text-purple-600 dark:text-purple-400 flex items-center gap-1">
-                                <span className="material-symbols-outlined text-base">distance</span>
-                                <span>Faltam {(displayCurrentWeight - realPatient.targetWeight).toFixed(1)} kg</span>
-                            </div>
-                        )}
-                        {!realPatient.targetWeight && (
-                            <div className="text-xs font-medium mt-2 text-slate-400">
-                                <span>Sem meta definida</span>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* BMI Card */}
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
-                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                            <span className="material-symbols-outlined text-4xl text-orange-500">health_and_safety</span>
-                        </div>
-                        <p className="text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 md:mb-2">IMC</p>
-                        <div className="flex items-baseline gap-1">
-                            <span className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">{displayBMI}</span>
-                        </div>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-2 ${realPatient.bmiCategory === 'Normal' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' :
-                            realPatient.bmiCategory === 'Overweight' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' :
-                                'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                            }`}>
-                            {realPatient.bmiCategory === 'Overweight' ? 'Sobrepeso' :
-                                realPatient.bmiCategory === 'Obese' ? 'Obesidade' :
-                                    realPatient.bmiCategory === 'Normal' ? 'Normal' :
-                                        realPatient.bmiCategory}
-                        </span>
-                    </div>
-
-                    {/* Progress Card (Initial vs Current) */}
-                    <div className="bg-blue-600 rounded-2xl p-4 shadow-lg shadow-blue-500/30 text-white relative overflow-hidden group hover:shadow-xl transition-all">
-                        {/* Background Decoration */}
-                        <div className="absolute top-0 right-0 p-4 opacity-20">
-                            <span className="material-symbols-outlined text-6xl">leaderboard</span>
-                        </div>
-
-                        {/* Super Responder Badge Logic */}
-
-
-                        <div className="flex justify-between items-center mb-1 md:mb-2 relative z-10">
-                            <p className="text-[10px] md:text-xs font-medium text-blue-100 uppercase tracking-wider">Progresso Total</p>
-                        </div>
-
-                        <div className="flex items-baseline gap-1 relative z-10">
-                            <span className="text-3xl md:text-4xl font-black">{Number(displayTotalLost).toFixed(1)}</span>
-                            <span className="text-sm font-medium text-blue-100">kg elim.</span>
-                        </div>
-                        <div className="mt-3 w-full bg-black/20 rounded-full h-1.5 overflow-hidden">
-                            <div
-                                className="bg-white/90 h-full rounded-full transition-all duration-1000"
-                                style={{
-                                    width: `${displayProgressPercent}%`
-                                }}
-                            ></div>
-                        </div>
-                        <div className="flex justify-between mt-1">
-                            <span className="text-[10px] text-blue-200">Início: {realPatient.initialWeight}kg</span>
-                            <span className="text-sm text-blue-200">Meta: {realPatient.targetWeight || '?'}kg</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="mb-8 animate-in slide-in-from-bottom-2 duration-500 delay-100 group relative">
+                <div className="mb-8 group relative">
                     <WeightEvolutionChart
                         patient={realPatient}
                         weightHistory={weightHistory}
-                        onDeleteWeight={(point) => {
-                            if (point.id) {
-                                setWeightToDelete({ id: point.id, weight: point.weight, date: point.date });
-                            }
-                        }}
+                        onDeleteWeight={(point) => { if (!readonly && point.id) setWeightToDelete({ id: point.id, weight: point.weight, date: point.date }); }}
                         action={
-                            <button
-                                onClick={() => setIsAddWeightModalOpen(true)}
-                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 shadow-md border border-blue-500 rounded-xl text-xs md:text-sm font-bold text-white hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 hover:shadow-lg"
-                            >
-                                <span className="material-symbols-outlined text-lg">add_circle</span>
-                                Registrar Peso
-                            </button>
+                            <div className="flex items-center gap-2">
+                                {/* Botão Registrar DOSE - Só para Admin */}
+                                {!readonly && (
+                                    <button onClick={() => setIsHistoricalDoseModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 shadow-sm rounded-xl text-xs md:text-sm font-bold hover:bg-slate-50 transition-all hover:scale-105 active:scale-95">
+                                        <span className="material-symbols-outlined text-lg">vaccines</span>
+                                        Registrar Dose
+                                    </button>
+                                )}
+                                {/* Botão Registrar PESO - Visível para TODOS */}
+                                <button onClick={() => setIsAddWeightModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 shadow-md border border-blue-500 rounded-xl text-xs md:text-sm font-bold text-white hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 hover:shadow-lg">
+                                    <span className="material-symbols-outlined text-lg">add_circle</span>
+                                    Registrar Peso
+                                </button>
+                            </div>
                         }
                     />
                 </div>
 
-                {/* Weight Deletion Confirmation Modal */}
-                {weightToDelete && (
-                    <ConfirmDeleteModal
-                        isOpen={!!weightToDelete}
-                        onClose={() => setWeightToDelete(null)}
-                        onConfirm={async () => {
-                            if (!weightToDelete) return;
-                            try {
-                                const { error } = await supabase
-                                    .from('weight_measurements')
-                                    .delete()
-                                    .eq('id', weightToDelete.id);
-
-                                if (error) throw error;
-
-                                // RECALCULATE WEIGHT
-                                await recalculateAndSavePatientWeight(patient.id);
-
-                                setWeightToDelete(null);
-                                fetchData(); // Refresh data
-                            } catch (e) {
-                                alert('Erro ao excluir peso.');
-                                console.error(e);
-                            }
-                        }}
-                        title="Excluir Peso"
-                        message="Tem certeza que deseja excluir este registro? Esta ação não pode ser desfeita."
-                        itemName={`${weightToDelete.weight}kg em ${weightToDelete.date.toLocaleDateString('pt-BR')}`}
-                    />
-                )}
-
-                {/* Financial Section - New PatientFinancials */}
-                <PatientFinancials
-                    patient={realPatient}
-                    injections={injections}
-                    onUpdate={fetchData}
-                />
+                <PatientFinancials patient={realPatient} injections={injections} onUpdate={fetchData} />
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Left Column - Journey */}
                     <div className="lg:col-span-1 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 overflow-hidden flex flex-col">
-                        <div className="flex justify-between items-center mb-6 flex-shrink-0">
-                            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Jornada do Paciente</h3>
-                        </div>
-                        <div className="overflow-y-auto pr-2 -mr-2 flex-1">
-                            <MedicationPath
-                                steps={journeySteps}
-                                onEditStep={handleEditStep}
-                                onAddStep={() => setIsEditStepModalOpen(true)}
-                                onPaymentClick={handlePaymentClick}
-                                onDeleteStep={handleDeleteStep}
-                                paidStepIds={paidStepIds}
-                                patient={realPatient}
-                            />
-                        </div>
+                        <div className="flex justify-between items-center mb-6 flex-shrink-0"><h3 className="text-lg font-bold text-slate-900 dark:text-white">Jornada do Paciente</h3></div>
+                        <div className="overflow-y-auto pr-2 -mr-2 flex-1"><MedicationPath steps={journeySteps} onEditStep={handleEditStep} onAddStep={handleAddStep} onPaymentClick={handlePaymentClick} onDeleteStep={handleDeleteStep} paidStepIds={paidStepIds} patient={realPatient} readonly={readonly} /></div>
                     </div>
-
-                    {/* Right Column - History & Financial */}
-                    <InjectionHistoryTable
-                        injections={injections}
-                        onDelete={(id, inj) => {
-                            setInjectionToDelete({ id, name: `${inj.dosage} - ${inj.date}` });
-                            setIsConfirmDeleteModalOpen(true);
-                        }}
-                        onEdit={handleEditInjection}
-                        onAddHistorical={() => setIsHistoricalDoseModalOpen(true)}
-                        onTogglePayment={handleTogglePayment}
-                        highlightedDate={highlightedDate}
-                    />
+                    <InjectionHistoryTable injections={injections} onDelete={(id, inj) => { setInjectionToDelete({ id, name: `${inj.dosage} - ${inj.date}` }); setIsConfirmDeleteModalOpen(true); }} onEdit={handleEditInjection} onAddHistorical={() => setIsHistoricalDoseModalOpen(true)} onTogglePayment={async (inj) => { if (inj.id) { await supabase.from('injections').update({ is_paid: !inj.isPaid }).eq('id', inj.id); fetchData(); } }} highlightedDate={highlightedDate} readonly={readonly} />
                 </div>
             </main>
 
-            {/* Modals */}
-            {isEditStepModalOpen && (
-                <EditMedicationStepModal
-                    isOpen={isEditStepModalOpen}
-                    onClose={() => setIsEditStepModalOpen(false)}
-                    onSuccess={fetchData}
-                    patientId={patient.id}
-                    stepToEdit={selectedStep}
-                    nextOrderIndex={medicationSteps.length}
-                />
-            )}
+            {isAddWeightModalOpen && <AddWeightModal isOpen={isAddWeightModalOpen} onClose={() => setIsAddWeightModalOpen(false)} onSuccess={() => fetchData()} patientId={patient.id} currentWeight={realPatient.currentWeight} />}
 
-            {isEditPatientModalOpen && (
-                <AddPatientModal
-                    isOpen={isEditPatientModalOpen}
-                    onClose={() => setIsEditPatientModalOpen(false)}
-                    onSuccess={fetchData}
-                    patientToEdit={realPatient}
-                />
+            {!readonly && (
+                <>
+                    {isEditStepModalOpen && <EditMedicationStepModal isOpen={isEditStepModalOpen} onClose={() => setIsEditStepModalOpen(false)} onSuccess={fetchData} patientId={patient.id} stepToEdit={selectedStep} nextOrderIndex={medicationSteps.length} />}
+                    {isHistoricalDoseModalOpen && <GlobalRegisterDoseModal isOpen={isHistoricalDoseModalOpen} onClose={() => setIsHistoricalDoseModalOpen(false)} onSuccess={() => fetchData()} initialPatient={realPatient} />}
+                    {isPaymentModalOpen && selectedStepForPayment && <PaymentModal isOpen={isPaymentModalOpen} onClose={() => { setIsPaymentModalOpen(false); setSelectedStepForPayment(null); }} onSuccess={fetchData} step={selectedStepForPayment} patientId={patient.id} patientName={realPatient.name} />}
+                    {isEditDoseModalOpen && selectedInjectionForEdit && <GlobalRegisterDoseModal isOpen={isEditDoseModalOpen} onClose={() => { setIsEditDoseModalOpen(false); setSelectedInjectionForEdit(null); }} onSuccess={fetchData} editMode={true} editingInjection={selectedInjectionForEdit} />}
+                    {isDosePaymentModalOpen && selectedInjectionForPayment && <DosePaymentModal isOpen={isDosePaymentModalOpen} onClose={() => { setIsDosePaymentModalOpen(false); setSelectedInjectionForPayment(null); }} onSuccess={fetchData} injection={selectedInjectionForPayment} patientName={realPatient.name} />}
+                    {isEditPatientModalOpen && <AddPatientModal isOpen={isEditPatientModalOpen} onClose={() => setIsEditPatientModalOpen(false)} onSuccess={fetchData} patientToEdit={realPatient} />}
+                    <ConfirmDeleteModal isOpen={isConfirmDeleteModalOpen} onClose={() => { setIsConfirmDeleteModalOpen(false); setInjectionToDelete(null); setStepToDelete(null); }} onConfirm={stepToDelete ? confirmDeleteStep : confirmDelete} itemName={stepToDelete ? `Dose ${stepToDelete.dosage}` : (injectionToDelete?.name || '')} loading={isDeleting} />
+                    {weightToDelete && <ConfirmDeleteModal isOpen={!!weightToDelete} onClose={() => setWeightToDelete(null)} onConfirm={async () => { if (!weightToDelete) return; try { await supabase.from('weight_measurements').delete().eq('id', weightToDelete.id); await supabase.from('patients').update({ current_weight: (realPatient.initialWeight || 0) }).eq('id', patient.id); fetchData(); setWeightToDelete(null); } catch (e) { } }} title="Excluir Peso" message="Tem certeza?" itemName={`${weightToDelete.weight}kg`} />}
+                </>
             )}
-
-            {isHistoricalDoseModalOpen && (
-                <GlobalRegisterDoseModal
-                    isOpen={isHistoricalDoseModalOpen}
-                    onClose={() => setIsHistoricalDoseModalOpen(false)}
-                    onSuccess={(newInjection) => {
-                        if (newInjection) {
-                            setInjections(prev => [newInjection, ...prev]);
-                        }
-                        fetchData();
-                        setIsHistoricalDoseModalOpen(false);
-                    }}
-                    initialPatient={realPatient}
-                />
-            )}
-
-            {isPaymentModalOpen && selectedStepForPayment && (
-                <PaymentModal
-                    isOpen={isPaymentModalOpen}
-                    onClose={() => {
-                        setIsPaymentModalOpen(false);
-                        setSelectedStepForPayment(null);
-                    }}
-                    onSuccess={fetchData}
-                    step={selectedStepForPayment}
-                    patientId={patient.id}
-                    patientName={realPatient.name}
-                />
-            )}
-
-            {isEditDoseModalOpen && selectedInjectionForEdit && (
-                <GlobalRegisterDoseModal
-                    isOpen={isEditDoseModalOpen}
-                    onClose={() => {
-                        setIsEditDoseModalOpen(false);
-                        setSelectedInjectionForEdit(null);
-                    }}
-                    onSuccess={fetchData}
-                    editMode={true}
-                    editingInjection={selectedInjectionForEdit}
-                />
-            )}
-
-            {isDosePaymentModalOpen && selectedInjectionForPayment && (
-                <DosePaymentModal
-                    isOpen={isDosePaymentModalOpen}
-                    onClose={() => {
-                        setIsDosePaymentModalOpen(false);
-                        setSelectedInjectionForPayment(null);
-                    }}
-                    onSuccess={fetchData}
-                    injection={selectedInjectionForPayment}
-                    patientName={realPatient.name}
-                />
-            )}
-
-            {/* Confirm Delete Modal */}
-            <ConfirmDeleteModal
-                isOpen={isConfirmDeleteModalOpen}
-                onClose={() => {
-                    setIsConfirmDeleteModalOpen(false);
-                    setInjectionToDelete(null);
-                    setStepToDelete(null);
-                }}
-                onConfirm={stepToDelete ? confirmDeleteStep : confirmDelete}
-                itemName={stepToDelete ? `Dose ${stepToDelete.dosage}` : (injectionToDelete?.name || '')}
-                loading={isDeleting}
-            />
-            {/* Manual Weight Modal */}
-            <AddWeightModal
-                isOpen={isAddWeightModalOpen}
-                onClose={() => setIsAddWeightModalOpen(false)}
-                onSuccess={async () => {
-                    await recalculateAndSavePatientWeight(patient.id);
-                    fetchData(); // Refresh measurements
-                }}
-                patientId={patient.id}
-                currentWeight={realPatient.currentWeight}
-            />
         </div>
     );
 };

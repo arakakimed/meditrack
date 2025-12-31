@@ -123,7 +123,7 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
         }
     };
 
-    // --- CÁLCULOS TOTAIS GERAIS ---
+    // --- CÁLCULOS TOTAIS GERAIS (Display Cards) ---
     const totalRealized = useMemo(() =>
         injections.reduce((sum, inj) => sum + (inj.doseValue || 0), 0),
         [injections]);
@@ -142,14 +142,12 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
         );
 
         const startIndex = sorted.findIndex(inj => {
-            // Limpeza agressiva da string para pegar o número (ex: "2,5 mg" -> 2.5)
             const cleanString = String(inj.dosage).replace(',', '.').replace(/[^0-9.]/g, '');
             const dosageNum = parseFloat(cleanString);
             return dosageNum >= 2.5;
         });
 
-        // Se não achou nenhuma dose >= 2.5, retorna null (não exibe o card)
-        if (startIndex === -1) return null;
+        if (startIndex === -1) return null; // Nunca tomou Mounjaro >= 2.5
 
         const mounjaroPhase = sorted.slice(startIndex);
         if (mounjaroPhase.length === 0) return null;
@@ -157,46 +155,71 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
         const firstDate = new Date(mounjaroPhase[0].applicationDate || mounjaroPhase[0].date);
 
         // 2. Benchmarks de Mercado
-        const CONSULT_PRICE = 800; // Preço médio consulta particular
+        const CONSULT_PRICE = 600; // Preço atualizado conforme pedido
 
-        // 3. Cálculo
-        let marketDrugCost = 0;
-        let realInvestmentFiltered = 0;
+        // 3. Cálculo de Medicamento ("Box Theory" - Ineficiência do Varejo)
+        // Agrupar contagem de doses por miligramagem
+        const doseCounts: Record<string, number> = {};
+
+        // Variáveis para "Seu Investimento"
+        let realizedInvestmentFiltered = 0;
+        let paidInvestmentFiltered = 0;
 
         mounjaroPhase.forEach(inj => {
             const cleanString = String(inj.dosage).replace(',', '.').replace(/[^0-9.]/g, '');
             const doseNum = parseFloat(cleanString);
 
-            // Custo Real (Soma apenas desta fase)
-            realInvestmentFiltered += (inj.doseValue || 0);
+            let doseKey = String(doseNum);
+            if (doseNum <= 2.5) doseKey = '2.5';
+            else if (doseNum <= 5.0) doseKey = '5.0';
+            else if (doseNum <= 7.5) doseKey = '7.5';
+            else if (doseNum <= 10.0) doseKey = '10.0';
+            else if (doseNum <= 12.5) doseKey = '12.5';
+            else doseKey = '15.0';
 
-            // Custo Estimado Mercado (Preço Caixa / 4 doses)
-            let boxPrice = 0;
-            if (doseNum <= 2.5) boxPrice = 1500;
-            else if (doseNum <= 5.0) boxPrice = 1860;
-            else if (doseNum <= 7.5) boxPrice = 2600;
-            else boxPrice = 3000; // 10mg+
+            doseCounts[doseKey] = (doseCounts[doseKey] || 0) + 1;
 
-            marketDrugCost += (boxPrice / 4);
+            const val = inj.doseValue || 0;
+            realizedInvestmentFiltered += val;
+            if (inj.isPaid) {
+                paidInvestmentFiltered += val;
+            }
         });
 
-        // Cálculo de Consultas (Meses decorridos)
+        let marketDrugCost = 0;
+
+        const BOX_PRICES: Record<string, number> = {
+            '2.5': 1500,
+            '5.0': 1860,
+            '7.5': 2600,
+            '10.0': 3000,
+            '12.5': 3000,
+            '15.0': 3000
+        };
+
+        Object.keys(doseCounts).forEach(key => {
+            const count = doseCounts[key];
+            const pricePerBox = BOX_PRICES[key] || 3000;
+            const boxesNeeded = Math.ceil(count / 4);
+            marketDrugCost += boxesNeeded * pricePerBox;
+        });
+
         const today = new Date();
         const diffTime = Math.abs(today.getTime() - firstDate.getTime());
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        // Mínimo 1 mês
         const monthsInTreatment = Math.max(1, Math.ceil(diffDays / 30));
 
         const marketConsultsCost = monthsInTreatment * CONSULT_PRICE;
         const totalMarket = marketDrugCost + marketConsultsCost;
 
-        // Economia só faz sentido se for positiva
-        const savings = totalMarket - realInvestmentFiltered;
+        const displayInvestment = paidInvestmentFiltered > 0 ? paidInvestmentFiltered : realizedInvestmentFiltered;
+
+        const savings = totalMarket - displayInvestment;
 
         return {
             startDate: firstDate.toLocaleDateString('pt-BR'),
             marketTotal: totalMarket,
-            realTotal: realInvestmentFiltered,
+            displayInvestment: displayInvestment,
             savings: savings,
             marketBreakdown: { drug: marketDrugCost, consults: marketConsultsCost }
         };
@@ -207,13 +230,13 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
     return (
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden transition-all duration-300">
 
-            {/* Header Area (Always Visible) */}
+            {/* Header Area */}
             <div className="p-6 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50">
 
                 {/* Top Row: Title + Totals */}
                 <div
                     onClick={() => setIsExpanded(!isExpanded)}
-                    className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 cursor-pointer"
+                    className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 cursor-pointer"
                 >
                     <div className="flex items-center gap-3">
                         <button className="text-slate-400 hover:text-slate-600 transition-colors">
@@ -228,52 +251,91 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
                         </div>
                     </div>
 
-                    <div className="flex gap-2 md:gap-4 overflow-x-auto w-full md:w-auto">
-                        <div className="bg-white dark:bg-slate-700 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm min-w-[100px]">
-                            <p className="text-[10px] md:text-xs font-semibold text-slate-500 uppercase">Realizado</p>
-                            <p className="text-base md:text-lg font-bold text-orange-500">{formatCurrency(totalRealized)}</p>
+                    {/* --- CARDS DE TOTAIS (AJUSTADO: GRID 3 COLUNAS) --- */}
+                    {/* --- CARDS DE TOTAIS (REDESIGNED) --- */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full md:w-auto md:min-w-[650px]">
+                        {/* Realizado */}
+                        <div className="bg-white dark:bg-slate-700 p-4 rounded-2xl border border-slate-100 dark:border-slate-600 shadow-sm flex items-center gap-4 relative overflow-hidden group hover:border-orange-200 transition-colors">
+                            <div className="absolute right-0 top-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
+                                <span className="material-symbols-outlined text-6xl text-slate-400">shopping_bag</span>
+                            </div>
+                            <div className="w-12 h-12 rounded-xl bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center text-orange-500 flex-shrink-0">
+                                <span className="material-symbols-outlined text-2xl">shopping_bag</span>
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Realizado</p>
+                                <p className="text-xl font-bold text-slate-900 dark:text-white">{formatCurrency(totalRealized)}</p>
+                            </div>
                         </div>
-                        <div className="bg-white dark:bg-slate-700 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm min-w-[100px]">
-                            <p className="text-[10px] md:text-xs font-semibold text-slate-500 uppercase">Total Pago</p>
-                            <p className="text-base md:text-lg font-bold text-emerald-600">{formatCurrency(totalPaid)}</p>
+
+                        {/* Total Pago */}
+                        <div className="bg-white dark:bg-slate-700 p-4 rounded-2xl border border-slate-100 dark:border-slate-600 shadow-sm flex items-center gap-4 relative overflow-hidden group hover:border-emerald-200 transition-colors">
+                            <div className="absolute right-0 top-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
+                                <span className="material-symbols-outlined text-6xl text-emerald-400">payments</span>
+                            </div>
+                            <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 flex-shrink-0">
+                                <span className="material-symbols-outlined text-2xl">payments</span>
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Total Pago</p>
+                                <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(totalPaid)}</p>
+                            </div>
                         </div>
-                        <div className="bg-white dark:bg-slate-700 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm min-w-[100px]">
-                            <p className="text-[10px] md:text-xs font-semibold text-slate-500 uppercase">Saldo</p>
-                            <p className={`text-base md:text-lg font-bold ${saldo >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                                {formatCurrency(saldo)}
-                            </p>
+
+                        {/* Saldo */}
+                        <div className="bg-white dark:bg-slate-700 p-4 rounded-2xl border border-slate-100 dark:border-slate-600 shadow-sm flex items-center gap-4 relative overflow-hidden group hover:border-blue-200 transition-colors">
+                            <div className="absolute right-0 top-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
+                                <span className="material-symbols-outlined text-6xl text-blue-400">account_balance_wallet</span>
+                            </div>
+                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${saldo >= 0
+                                ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
+                                : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                                }`}>
+                                <span className="material-symbols-outlined text-2xl">account_balance_wallet</span>
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Saldo (Pendente)</p>
+                                <p className={`text-xl font-bold ${saldo >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+                                    {formatCurrency(saldo)}
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                {/* --- AQUI ESTÁ O CARD QUE DEVE APARECER --- */}
-                {/* SMART CHOICE (Relatório de Eficiência Financeira) */}
+                {/* --- SMART CHOICE CARD --- */}
                 {smartChoiceData && smartChoiceData.savings > 0 && (
                     <div className="mt-6 p-1 rounded-2xl bg-gradient-to-r from-slate-800 to-slate-900 shadow-lg animate-in fade-in slide-in-from-top-2 duration-500">
                         <div className="bg-slate-900/90 rounded-xl p-4 md:p-5 backdrop-blur-sm relative overflow-hidden group">
-                            {/* Decorative Icon Background */}
                             <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none transition-opacity group-hover:opacity-20">
                                 <span className="material-symbols-outlined text-8xl text-emerald-400">savings</span>
                             </div>
 
                             <div className="flex flex-col md:flex-row justify-between items-center gap-6 relative z-10">
-                                {/* Title Section */}
-                                <div className="flex items-start gap-3 w-full md:w-auto">
-                                    <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20 text-emerald-400">
-                                        <span className="material-symbols-outlined">diamond</span>
+                                <div className="flex items-center gap-4 w-full md:w-auto">
+                                    <div className="relative">
+                                        <div className="absolute inset-0 bg-emerald-500 blur-lg opacity-20 rounded-full"></div>
+                                        <div className="relative p-3 bg-gradient-to-br from-emerald-500/20 to-teal-900/50 rounded-2xl border border-emerald-500/30 shadow-inner">
+                                            <span className="material-symbols-outlined text-3xl text-emerald-400">diamond</span>
+                                        </div>
                                     </div>
                                     <div>
-                                        <h4 className="font-bold text-white text-base md:text-lg leading-tight">Smart Choice</h4>
-                                        <p className="text-xs text-slate-400 mt-0.5">
-                                            Eficiência vs. Mercado (Ref. Mounjaro®)
-                                        </p>
-                                        <p className="text-[10px] text-slate-500">Desde: {smartChoiceData.startDate}</p>
+                                        <h4 className="font-black text-2xl md:text-3xl text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-200 to-white drop-shadow-sm tracking-tight">
+                                            Smart Choice
+                                        </h4>
+                                        <div className="flex flex-col gap-0.5">
+                                            <p className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                Eficiência Extreme
+                                            </p>
+                                            <p className="text-[10px] text-slate-600 font-mono mt-0.5 opacity-80">
+                                                Ref. Mounjaro® • {smartChoiceData.startDate}
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
 
-                                {/* Metrics Grid */}
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full md:w-auto">
-                                    {/* Market Value */}
                                     <div className="text-center sm:text-left">
                                         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-0.5">Valor de Mercado</p>
                                         <p className="text-xl font-bold text-slate-400 line-through decoration-slate-600 decoration-2">
@@ -284,15 +346,13 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
                                         </p>
                                     </div>
 
-                                    {/* Real Investment */}
                                     <div className="text-center sm:text-left">
                                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Seu Investimento</p>
                                         <p className="text-2xl font-bold text-white">
-                                            {formatCurrency(smartChoiceData.realTotal)}
+                                            {formatCurrency(smartChoiceData.displayInvestment)}
                                         </p>
                                     </div>
 
-                                    {/* Savings Highlight */}
                                     <div className="bg-emerald-500/10 px-5 py-2 rounded-xl border border-emerald-500/20 text-center sm:text-right shadow-[0_0_15px_rgba(16,185,129,0.1)]">
                                         <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-0.5 flex items-center justify-center sm:justify-end gap-1">
                                             <span className="material-symbols-outlined text-sm">trending_down</span>
@@ -312,13 +372,12 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
             {/* Collapsible Content (Tabs) */}
             {isExpanded && (
                 <div className="animate-in slide-in-from-top-2 duration-300">
-                    {/* Tabs Navigation */}
                     <div className="flex border-b border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800">
                         <button
                             onClick={() => setActiveTab('pending')}
                             className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'pending'
-                                    ? 'border-orange-500 text-orange-600 bg-orange-50/10'
-                                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                                ? 'border-orange-500 text-orange-600 bg-orange-50/10'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
                                 }`}
                         >
                             Realizado ({pendingInjections.length})
@@ -326,15 +385,14 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
                         <button
                             onClick={() => setActiveTab('history')}
                             className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'history'
-                                    ? 'border-emerald-500 text-emerald-600 bg-emerald-50/10'
-                                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                                ? 'border-emerald-500 text-emerald-600 bg-emerald-50/10'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
                                 }`}
                         >
                             Histórico ({financialRecords.length})
                         </button>
                     </div>
 
-                    {/* Tab Content */}
                     <div className="p-4 bg-white dark:bg-slate-800 flex-1 overflow-auto min-h-[200px] max-h-[500px]">
                         {activeTab === 'pending' ? (
                             <div className="space-y-3">
@@ -368,8 +426,8 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
                                                         onClick={() => handlePayInjection(inj)}
                                                         disabled={!!processingId || isProcessing}
                                                         className={`px-4 py-2 text-xs font-bold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center gap-1 ${isProcessing
-                                                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed dark:bg-slate-700 dark:text-slate-500'
-                                                                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed dark:bg-slate-700 dark:text-slate-500'
+                                                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                                                             }`}
                                                     >
                                                         {processingId === inj.id ? '...' : (isProcessing ? 'Análise' : 'Pagar')}
@@ -422,7 +480,6 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
                         )}
                     </div>
 
-                    {/* Footer Action */}
                     <div className="p-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-center">
                         <button
                             onClick={() => setIsPaymentModalOpen(true)}

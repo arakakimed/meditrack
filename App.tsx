@@ -1,56 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { Patient, mockPatients } from './types';
-import Layout from './components/Layout';
+import { supabase } from './lib/supabase';
+import { Patient } from './types';
+
+import AuthPage from './components/AuthPage';
 import DashboardPage from './components/DashboardPage';
-import PatientProfilePage from './components/PatientProfilePage';
-import FinancialsPage from './components/FinancialsPage';
+import PatientsPage from './components/PatientsPage';
 import SchedulePage from './components/SchedulePage';
 import MedicationsPage from './components/MedicationsPage';
+import FinancialsPage from './components/FinancialsPage';
+import PatientProfilePage from './components/PatientProfilePage';
 import SettingsPage from './components/SettingsPage';
-import AuthPage from './components/AuthPage';
-import AddPatientModal from './components/AddPatientModal';
-import PatientsPage from './components/PatientsPage';
-import GlobalRegisterDoseModal from './components/GlobalRegisterDoseModal';
-import TagManagerModal from './components/TagManagerModal';
-import FirstAccessPage from './components/FirstAccessPage';
-import { supabase } from './lib/supabase';
-import { Session } from '@supabase/supabase-js';
-import ErrorBoundary from './components/ErrorBoundary';
 
-export type View = 'dashboard' | 'patients' | 'schedule' | 'settings' | 'financials' | 'patientProfile' | 'medications';
+export type View = 'dashboard' | 'patients' | 'schedule' | 'medications' | 'financials' | 'settings' | 'patient_profile';
 
 const App: React.FC = () => {
-    const [view, setView] = useState<View>('dashboard');
-    const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
-    const [patientToEdit, setPatientToEdit] = useState<any | null>(null);
-    const [isGlobalDoseModalOpen, setIsGlobalDoseModalOpen] = useState(false);
-    const [isAddPatientModalOpen, setIsAddPatientModalOpen] = useState(false);
-    const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
-    const [refreshKey, setRefreshKey] = useState(0); // For forcing re-fetch
-    const [session, setSession] = useState<Session | null>(null);
+    const [session, setSession] = useState<any>(null);
+    const [userRole, setUserRole] = useState<'admin' | 'staff' | 'patient' | 'unauthorized' | null>(null);
+    const [patientData, setPatientData] = useState<Patient | null>(null);
+    const [currentView, setCurrentView] = useState<View>('dashboard');
     const [loading, setLoading] = useState(true);
-    const [userRole, setUserRole] = useState<string | null>(null);
-    const [showFirstAccess, setShowFirstAccess] = useState(false);
+
+    // Estado para quando o Admin visualiza um paciente
+    const [adminViewingPatient, setAdminViewingPatient] = useState<Patient | null>(null);
 
     useEffect(() => {
-        // Get initial session
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
-            if (session) {
-                checkUserRole(session.user.id);
-            } else {
-                setLoading(false);
-            }
+            if (session) checkUserRole(session.user.id);
+            else setLoading(false);
         });
 
-        // Listen for changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
             if (session) {
                 checkUserRole(session.user.id);
             } else {
                 setUserRole(null);
-                setShowFirstAccess(false);
+                setPatientData(null);
+                setAdminViewingPatient(null);
+                setCurrentView('dashboard');
+                setLoading(false);
             }
         });
 
@@ -58,87 +47,16 @@ const App: React.FC = () => {
     }, []);
 
     const checkUserRole = async (userId: string) => {
-        console.log('Checking user role/status for:', userId);
+        setLoading(true);
         try {
-            let role = null;
-
-            // 0. SUPER ADMIN HARDCODE (God Mode)
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user?.email === 'arakaki.med@gmail.com') {
-                console.log('⚡ SUPER ADMIN DETECTED ⚡');
-                role = 'Admin';
-                setShowFirstAccess(false);
-                setUserRole('Admin');
-
-                // Ensure profile exists/is correct
-                // Fire and forget upsert to fix DB if broken
-                supabase.from('profiles').upsert({
-                    id: userId,
-                    email: user.email,
-                    role: 'Admin',
-                    name: 'SuperAdmin',
-                    status: 'Active',
-                    initials: 'SA'
-                }).then(({ error }) => {
-                    if (error) console.error('Auto-fixing SuperAdmin profile failed:', error);
-                    else console.log('SuperAdmin profile auto-fixed.');
-                });
-
-                return;
-            }
-
-            // 1. Always check Profile first (Source of Truth for Roles)
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('role')
-                .eq('id', userId)
-                .single();
-
-            if (profile) {
-                console.log('Profile Role found:', profile.role);
-                role = profile.role;
+            const { data: profile, error } = await supabase.from('profiles').select('role, patient_id').eq('id', userId).single();
+            if (error || !profile) {
+                setUserRole('unauthorized');
             } else {
-                // Backup: Check metadata if profile is missing
-                console.warn('Profile not found in profiles table. Checking metadata...');
-                const metaRole = user?.user_metadata?.role;
-                if (metaRole === 'Admin' || metaRole === 'Staff') {
-                    console.log('Role found in metadata:', metaRole);
-                    role = metaRole;
-                }
-            }
-
-            // 2. Decide based on Role
-            if (role === 'Admin' || role === 'Staff') {
-                // Admins/Staff NEVER see First Access, regardless of patients table
-                setShowFirstAccess(false);
-                setUserRole(role);
-                // Admin stays on dashboard or whatever default view is
-                return;
-            }
-
-            // 3. If standard user or patient, check/enforce Patient Record
-            role = 'Patient'; // Defaulting to Patient if not admin
-
-            const { data: patientRecord } = await supabase
-                .from('patients')
-                .select('id')
-                .eq('user_id', userId)
-                .single();
-
-            if (patientRecord) {
-                // Patient EXISTS -> Go to Profile
-                setShowFirstAccess(false);
-                setUserRole('Patient');
-
-                // Fetch full data
-                const { data: patient } = await supabase
-                    .from('patients')
-                    .select('*')
-                    .eq('user_id', userId)
-                    .single();
-
-                if (patient) {
-                    const mappedPatient: Patient = {
+                setUserRole(profile.role as any);
+                if (profile.role === 'patient' && profile.patient_id) {
+                    const { data: patient } = await supabase.from('patients').select('*').eq('id', profile.patient_id).single();
+                    if (patient) setPatientData({
                         id: patient.id,
                         name: patient.name,
                         initials: patient.initials,
@@ -146,218 +64,114 @@ const App: React.FC = () => {
                         gender: patient.gender,
                         avatarUrl: patient.avatar_url,
                         currentWeight: patient.current_weight,
-                        weightChange: 0,
+                        initialWeight: patient.initial_weight,
+                        weightChange: patient.weight_change,
+                        targetWeight: patient.target_weight,
+                        height: patient.height,
                         bmi: patient.bmi,
                         bmiCategory: patient.bmi_category,
-                        tags: patient.tags || [],
-                        initialWeight: patient.initial_weight || patient.current_weight,
-                        targetWeight: patient.target_weight,
-                        height: patient.height
-                    };
-                    setSelectedPatient(mappedPatient);
-                    setView('patientProfile');
+                        email: patient.email
+                    });
                 }
-
-            } else {
-                // Patient MISSING -> Show First Access
-                console.log('User is not Admin and has no patient record -> First Access');
-                setShowFirstAccess(true);
-                setUserRole('Patient'); // Tentative role
             }
-
-        } catch (error) {
-            console.error('Error checking user role:', error);
-            // On error, safest to default to standard view or error state, but let's leave as is to avoid lockout
+        } catch (err) {
+            setUserRole('unauthorized');
         } finally {
             setLoading(false);
         }
     };
 
+    const handleLogout = async () => { await supabase.auth.signOut(); };
 
-    if (loading) {
+    if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div></div>;
+    if (!session) return <AuthPage />;
+    if (userRole === 'unauthorized') return <div className="p-10 text-center">Acesso não configurado. <button onClick={handleLogout}>Sair</button></div>;
+
+    // ROTA PACIENTE (Visualização Única)
+    if (userRole === 'patient') {
+        if (!patientData) return <div className="p-10 text-center">Carregando...</div>;
         return (
-            <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-                <div className="w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+            <div className="min-h-screen bg-slate-50 dark:bg-slate-900 relative">
+                <div className="absolute top-4 right-4 z-50">
+                    <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 bg-white/90 backdrop-blur-md shadow-sm border border-slate-200 rounded-full text-xs font-bold text-rose-600 hover:bg-rose-50 transition-all">
+                        <span className="material-symbols-outlined text-sm">logout</span> Sair
+                    </button>
+                </div>
+                <PatientProfilePage patient={patientData} onBack={() => { }} onGoHome={() => { }} readonly={true} />
             </div>
         );
     }
 
-    if (!session) {
-        return <AuthPage onAuthSuccess={() => { /* State handled by onAuthStateChange */ }} />;
-    }
-
-    // New User / First Access Flow
-    if (showFirstAccess) {
-        return <FirstAccessPage onSuccess={() => checkUserRole(session.user.id)} />;
-    }
-
-    const handleViewPatient = async (patientOrId: any) => {
-        if (typeof patientOrId === 'string') {
-            // Fetch patient from Supabase by ID
-            const { data: patient, error } = await supabase
-                .from('patients')
-                .select('*')
-                .eq('id', patientOrId)
-                .single();
-
-            if (error) {
-                console.error('Error fetching patient:', error);
-                return;
-            }
-
-            if (patient) {
-                const mappedPatient: Patient = {
-                    id: patient.id,
-                    name: patient.name,
-                    initials: patient.initials,
-                    age: patient.age,
-                    gender: patient.gender,
-                    avatarUrl: patient.avatar_url,
-                    currentWeight: patient.current_weight,
-                    weightChange: patient.weight_change || 0,
-                    bmi: patient.bmi,
-                    bmiCategory: patient.bmi_category,
-                    tags: patient.tags || [],
-                    initialWeight: patient.initial_weight || patient.current_weight,
-                    targetWeight: patient.target_weight,
-                    height: patient.height
-                };
-                setSelectedPatient(mappedPatient);
-                setView('patientProfile');
-            }
-            return;
+    // ROTA ADMIN (Layout Completo)
+    const renderAdminContent = () => {
+        // Se estiver vendo um paciente, renderiza AQUI DENTRO para manter o layout
+        if (adminViewingPatient) {
+            return (
+                <PatientProfilePage
+                    patient={adminViewingPatient}
+                    onBack={() => setAdminViewingPatient(null)}
+                    onGoHome={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }}
+                    readonly={false} // Admin tem poder total
+                />
+            );
         }
 
-        const patient = patientOrId;
-        // Map from DB schema to frontend types
-        const mappedPatient: Patient = {
-            id: patient.id,
-            name: patient.name,
-            initials: patient.initials,
-            age: patient.age,
-            gender: patient.gender,
-            avatarUrl: patient.avatar_url,
-            currentWeight: patient.current_weight,
-            weightChange: patient.weight_change || 0,
-            bmi: patient.bmi,
-            bmiCategory: patient.bmi_category,
-            tags: patient.tags || [],
-            initialWeight: patient.initial_weight || patient.current_weight,
-            targetWeight: patient.target_weight,
-            height: patient.height
-        };
-        setSelectedPatient(mappedPatient);
-        setView('patientProfile');
-    };
-
-    const handleBackToPatients = () => {
-        if (userRole === 'Patient') return; // Prevent patients from going back
-        setView('patients');
-        setSelectedPatient(null);
-    }
-
-    const handleOpenDoseModal = (patient: Patient) => {
-        // Now using GlobalRegisterDoseModal instead of old RegisterDoseModal
-        setIsGlobalDoseModalOpen(true);
-    };
-
-    const handleEditPatient = (patient: any) => {
-        setPatientToEdit(patient);
-        setIsAddPatientModalOpen(true);
-    };
-
-    const handlePatientActionSuccess = () => {
-        setRefreshKey(prev => prev + 1);
-        setIsAddPatientModalOpen(false);
-        setPatientToEdit(null);
-        // Dispatch global event for other components (like PatientProfilePage) to refresh
-        window.dispatchEvent(new CustomEvent('global-dose-added'));
-
-        // If patient, re-fetch self to update UI
-        if (userRole === 'Patient' && session) {
-            checkUserRole(session.user.id);
-        }
-    };
-
-    const renderContent = () => {
-        const commonProps = {
-            onAddPatient: () => setIsAddPatientModalOpen(true),
-            onManageTags: () => setIsTagManagerOpen(true)
-        };
-
-        switch (view) {
-            case 'dashboard':
-                return <DashboardPage
-                    onViewPatient={handleViewPatient}
-                    onAdministerDose={handleOpenDoseModal}
-                    onAddPatient={() => setIsAddPatientModalOpen(true)}
-                    setView={setView}
-                    {...commonProps}
-                />;
-            case 'patientProfile':
-                return selectedPatient ? <PatientProfilePage patient={selectedPatient} onBack={handleBackToPatients} onGoHome={() => userRole !== 'Patient' && setView('dashboard')} isPatientView={userRole === 'Patient'} /> : <div>Paciente não encontrado.</div>;
-            case 'financials':
-                return <FinancialsPage />;
-            case 'patients':
-                return <PatientsPage key={refreshKey} onViewPatient={handleViewPatient} onEditPatient={handleEditPatient} {...commonProps} />;
-            case 'schedule':
-                return <SchedulePage onViewPatient={handleViewPatient} />;
-            case 'medications':
-                return <MedicationsPage />;
-            case 'settings':
-                return <SettingsPage />;
-            default:
-                return <DashboardPage
-                    onViewPatient={handleViewPatient}
-                    onAdministerDose={handleOpenDoseModal}
-                    onAddPatient={() => setIsAddPatientModalOpen(true)}
-                    setView={setView}
-                />;
+        switch (currentView) {
+            case 'dashboard': return <DashboardPage onViewPatient={(p) => setCurrentView('patients')} onAdministerDose={() => { }} onAddPatient={() => setCurrentView('patients')} setView={setCurrentView} />;
+            case 'patients': return <PatientsPage onViewPatient={(patient) => setAdminViewingPatient(patient)} onEditPatient={() => { }} onAddPatient={() => { }} onManageTags={() => { }} />;
+            case 'schedule': return <SchedulePage />;
+            case 'medications': return <MedicationsPage />;
+            case 'financials': return <FinancialsPage />;
+            case 'settings': return <SettingsPage />;
+            default: return <DashboardPage setView={setCurrentView} onViewPatient={() => { }} onAdministerDose={() => { }} onAddPatient={() => { }} />;
         }
     };
 
     return (
-        <ErrorBoundary>
-            <Layout
-                view={view}
-                setView={setView}
-                onOpenGlobalDose={() => setIsGlobalDoseModalOpen(true)}
-                onViewPatient={userRole === 'Patient' ? undefined : handleViewPatient}
-                userRole={userRole} // Pass user role
-            >
-                {renderContent()}
-            </Layout>
+        <div className="flex h-screen bg-slate-50 dark:bg-slate-900 overflow-hidden">
+            {/* Sidebar Desktop */}
+            <aside className="hidden md:flex flex-col w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 z-20">
+                <div className="p-6 flex items-center gap-3">
+                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">M</div>
+                    <span className="text-xl font-bold text-slate-800 dark:text-white">MediTrack</span>
+                </div>
+                <nav className="flex-1 px-4 space-y-1 overflow-y-auto py-4">
+                    <SidebarItem icon="dashboard" label="Painel" active={currentView === 'dashboard' && !adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }} />
+                    <SidebarItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
+                    <SidebarItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
+                    <SidebarItem icon="medication" label="Medicações" active={currentView === 'medications'} onClick={() => { setAdminViewingPatient(null); setCurrentView('medications'); }} />
+                    <SidebarItem icon="payments" label="Financeiro" active={currentView === 'financials'} onClick={() => { setAdminViewingPatient(null); setCurrentView('financials'); }} />
+                    <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-700"><SidebarItem icon="settings" label="Configurações" active={currentView === 'settings'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} /></div>
+                </nav>
+                <div className="p-4 border-t border-slate-200 dark:border-slate-700">
+                    <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-slate-600 hover:bg-slate-50 transition-colors"><span className="material-symbols-outlined">logout</span> <span className="font-medium text-sm">Sair</span></button>
+                </div>
+            </aside>
 
-            {/* Modal Logic */}
-            {/* Hide global add dose/patient for patients generally */}
-            {userRole !== 'Patient' && (
-                <>
-                    <GlobalRegisterDoseModal
-                        isOpen={isGlobalDoseModalOpen}
-                        onClose={() => setIsGlobalDoseModalOpen(false)}
-                        onSuccess={handlePatientActionSuccess}
-                    />
-                    <AddPatientModal
-                        isOpen={isAddPatientModalOpen}
-                        patientToEdit={patientToEdit}
-                        onClose={() => {
-                            setIsAddPatientModalOpen(false);
-                            setPatientToEdit(null);
-                        }}
-                        onSuccess={handlePatientActionSuccess}
-                        onManageTags={() => setIsTagManagerOpen(true)}
-                    />
-                    <TagManagerModal
-                        isOpen={isTagManagerOpen}
-                        onClose={() => {
-                            setIsTagManagerOpen(false);
-                            setRefreshKey(prev => prev + 1);
-                        }}
-                    />
-                </>
-            )}
-        </ErrorBoundary>
+            {/* Mobile Nav */}
+            <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200 flex justify-around p-2 pb-safe z-50">
+                <MobileNavItem icon="dashboard" label="Painel" active={currentView === 'dashboard' && !adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }} />
+                <MobileNavItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
+                <MobileNavItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
+                <MobileNavItem icon="settings" label="Ajustes" active={currentView === 'settings'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} />
+            </div>
+
+            <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+                <header className="md:hidden h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 flex-shrink-0 z-10">
+                    <span className="font-bold text-slate-800">MediTrack Admin</span>
+                    <button onClick={handleLogout}><span className="material-symbols-outlined text-slate-500">logout</span></button>
+                </header>
+                <div className="flex-1 overflow-y-auto p-0">{renderAdminContent()}</div>
+            </main>
+        </div>
     );
 };
+
+const SidebarItem: React.FC<any> = ({ icon, label, active, onClick }) => (
+    <button onClick={onClick} className={`flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all ${active ? 'bg-blue-50 text-blue-600 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}><span className={`material-symbols-outlined text-[22px] ${active ? 'fill-current' : ''}`}>{icon}</span><span className="text-sm">{label}</span></button>
+);
+const MobileNavItem: React.FC<any> = ({ icon, label, active, onClick }) => (
+    <button onClick={onClick} className={`flex flex-col items-center justify-center w-16 gap-1 ${active ? 'text-blue-600' : 'text-slate-400'}`}><span className={`material-symbols-outlined text-2xl ${active ? 'fill-current' : ''}`}>{icon}</span><span className="text-[10px] font-bold">{label}</span></button>
+);
 
 export default App;

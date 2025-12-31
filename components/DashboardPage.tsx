@@ -1,377 +1,295 @@
 import React, { useState, useEffect } from 'react';
-import { Patient } from '../types';
-import type { View } from '../App';
 import { supabase } from '../lib/supabase';
+import { Patient } from '../types';
+import AddPatientModal from './AddPatientModal';
+import GlobalRegisterDoseModal from './GlobalRegisterDoseModal';
 
-interface StatCardProps {
-    title: string;
-    value: string;
-    change?: string;
-    changeType?: 'positive' | 'negative';
-    unit: string;
-    icon: string;
-    iconColorClass: string;
-    actionText?: string;
-    actionColorClass?: string;
-}
-
-// Color themes for each card type
-const cardThemes = {
-    primary: 'from-blue-600 to-indigo-600 shadow-blue-500/25',
-    danger: 'from-rose-500 to-pink-600 shadow-rose-500/25',
-    success: 'from-emerald-500 to-teal-600 shadow-emerald-500/25',
-    purple: 'from-violet-500 to-purple-600 shadow-violet-500/25',
-    amber: 'from-amber-500 to-orange-600 shadow-amber-500/25',
-    cyan: 'from-cyan-500 to-blue-500 shadow-cyan-500/25',
-};
-
-interface ExtendedStatCardProps extends StatCardProps {
-    theme?: keyof typeof cardThemes;
-}
-
-const StatCard: React.FC<ExtendedStatCardProps> = ({ title, value, change, changeType, unit, icon, theme = 'primary', actionText }) => {
-    const gradientClass = cardThemes[theme] || cardThemes.primary;
-    const isPositive = changeType === 'positive';
-
-    return (
-        <div className={`bg-gradient-to-br ${gradientClass} rounded-2xl p-6 shadow-xl flex flex-col justify-between h-36 relative overflow-hidden group hover:scale-[1.02] transition-all duration-300 cursor-pointer border border-white/10`}>
-            {/* Decorative background icons */}
-            <div className="absolute -right-4 -bottom-4 opacity-15 group-hover:opacity-25 transition-opacity duration-300">
-                <span className="material-symbols-outlined text-[120px] text-white">{icon}</span>
-            </div>
-            <div className="absolute right-16 top-2 opacity-10 rotate-12">
-                <span className="material-symbols-outlined text-[60px] text-white">{icon}</span>
-            </div>
-
-            {/* Content */}
-            <div className="relative z-10">
-                <p className="text-white/80 text-sm font-medium tracking-wide">{title}</p>
-            </div>
-
-            <div className="relative z-10 flex items-end justify-between">
-                <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-bold text-white drop-shadow-sm">{value}</span>
-                    <span className="text-white/70 text-sm font-medium">{unit}</span>
-                </div>
-
-                {change && (
-                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold backdrop-blur-sm ${isPositive ? 'bg-white/20 text-white' : 'bg-white/20 text-white'}`}>
-                        <span className="material-symbols-outlined text-sm">{isPositive ? 'trending_up' : 'trending_down'}</span>
-                        {change}
-                    </span>
-                )}
-
-                {actionText && (
-                    <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold bg-white/25 text-white backdrop-blur-sm animate-pulse">
-                        <span className="material-symbols-outlined text-sm">priority_high</span>
-                        {actionText}
-                    </span>
-                )}
-            </div>
-        </div>
-    );
-};
-
-import { TAG_COLORS } from './TagManagerModal';
-
-interface UpcomingDosesTableProps {
-    onViewPatient: (patientId: string) => void;
+interface DashboardPageProps {
+    onViewPatient: (patient: Patient) => void;
     onAdministerDose: (patient: Patient) => void;
-    setView: (view: View) => void;
+    onAddPatient: () => void;
+    setView: (view: any) => void;
 }
 
-const UpcomingDosesTable: React.FC<UpcomingDosesTableProps> = ({ onViewPatient, onAdministerDose, setView }) => {
-    const [doses, setDoses] = useState<any[]>([]);
+const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient }) => {
+    const [stats, setStats] = useState({
+        totalPatients: 0,
+        activePatients: 0,
+        dosesToday: 0,
+        delayedDoses: 0,
+        monthlyRevenue: 0
+    });
+    const [todaysDoses, setTodaysDoses] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-    const [clinicTags, setClinicTags] = useState<any[]>([]);
 
-    const fetchDoses = async () => {
+    // Estados do Menu de Ação (+)
+    const [showActionMenu, setShowActionMenu] = useState(false);
+    const [isAddPatientModalOpen, setIsAddPatientModalOpen] = useState(false);
+
+    // Estados do Fluxo de Dose
+    const [isPatientSelectorOpen, setIsPatientSelectorOpen] = useState(false);
+    const [patientSearchTerm, setPatientSearchTerm] = useState('');
+    const [patientSearchResults, setPatientSearchResults] = useState<Patient[]>([]);
+    const [selectedPatientForDose, setSelectedPatientForDose] = useState<Patient | null>(null);
+    const [isDoseModalOpen, setIsDoseModalOpen] = useState(false);
+
+    const fetchDashboardData = async () => {
         setLoading(true);
         try {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
+            // Ajuste de Fuso Horário para garantir que "Hoje" é "Hoje no Brasil"
+            const localDate = new Date();
+            localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
+            const today = localDate.toISOString().split('T')[0];
 
-            // Fetch Doses
-            const { data, error } = await supabase
-                .from('upcoming_doses')
-                .select('*, patients(*)')
-                .gte('scheduled_at', today.toISOString())
-                .order('scheduled_at', { ascending: true })
-                .limit(5);
+            const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
 
-            if (error) throw error;
-            setDoses(data || []);
+            // 1. Stats Básicos
+            const { count: totalP } = await supabase.from('patients').select('*', { count: 'exact', head: true });
 
-            // Fetch Tags
-            const { data: tagsData } = await supabase.from('clinic_tags').select('*');
-            if (tagsData) setClinicTags(tagsData);
+            // 2. Doses Hoje
+            const { data: upcoming, error: upcomingError } = await supabase
+                .from('medication_steps')
+                .select('*, patients!inner(name, avatar_url, initials)') // !inner força trazer apenas se achar o paciente
+                .eq('date', today)
+                .neq('status', 'Concluído');
 
-        } catch (err) {
-            console.error('Error fetching doses:', err);
+            if (upcomingError) console.error('Erro ao buscar doses:', upcomingError);
+
+            // 3. Doses Atrasadas
+            const { count: delayed } = await supabase
+                .from('medication_steps')
+                .select('*', { count: 'exact', head: true })
+                .lt('date', today)
+                .neq('status', 'Concluído');
+
+            // 4. Receita Mês
+            const { data: revenue } = await supabase
+                .from('financial_records')
+                .select('amount')
+                .eq('status', 'Pago')
+                .gte('created_at', firstDayOfMonth);
+
+            const totalRevenue = revenue?.reduce((acc, curr) => acc + Number(curr.amount), 0) || 0;
+
+            setStats({
+                totalPatients: totalP || 0,
+                activePatients: totalP || 0,
+                dosesToday: upcoming?.length || 0,
+                delayedDoses: delayed || 0,
+                monthlyRevenue: totalRevenue
+            });
+
+            setTodaysDoses(upcoming || []);
+
+        } catch (error) {
+            console.error('Erro dashboard:', error);
         } finally {
             setLoading(false);
         }
     };
 
-    useEffect(() => {
-        fetchDoses();
-    }, []);
+    useEffect(() => { fetchDashboardData(); }, []);
 
-    if (loading) {
-        return (
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-12 text-center text-slate-400">
-                <div className="flex flex-col items-center gap-2">
-                    <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-                    <span className="text-sm font-medium">Carregando agendamentos...</span>
-                </div>
-            </div>
-        );
-    }
+    // Busca de pacientes para o seletor
+    useEffect(() => {
+        const searchPatients = async () => {
+            if (patientSearchTerm.length < 2) { setPatientSearchResults([]); return; }
+            const { data } = await supabase.from('patients').select('*').ilike('name', `%${patientSearchTerm}%`).limit(5);
+            if (data) setPatientSearchResults(data as any);
+        };
+        const timer = setTimeout(searchPatients, 300);
+        return () => clearTimeout(timer);
+    }, [patientSearchTerm]);
+
+    const handleSelectPatient = (patient: Patient) => {
+        setSelectedPatientForDose(patient);
+        setIsPatientSelectorOpen(false);
+        setIsDoseModalOpen(true);
+    };
 
     return (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col h-full">
-            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
-                <div className="flex items-center gap-2">
-                    <div className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white p-2 rounded-xl shadow-lg shadow-blue-500/20">
-                        <span className="material-symbols-outlined text-[20px]">schedule</span>
-                    </div>
-                    <h3 className="font-bold text-slate-800 dark:text-white text-lg tracking-tight">Próximas Doses</h3>
+        <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 pb-24">
+
+            {/* Header com Botão + */}
+            <div className="flex justify-between items-center relative">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Olá, Doutor(a)</h1>
+                    <p className="text-slate-500 text-sm capitalize">
+                        {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    </p>
                 </div>
-                <button onClick={() => setView('schedule')} className="text-sm font-bold text-primary hover:text-blue-700 transition-colors bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg">
-                    Ver todas
-                </button>
+
+                <div className="relative">
+                    <button
+                        onClick={() => setShowActionMenu(!showActionMenu)}
+                        className="w-12 h-12 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 transition-all hover:scale-105 active:scale-95"
+                    >
+                        <span className="material-symbols-outlined text-3xl">add</span>
+                    </button>
+
+                    {/* Menu Flutuante */}
+                    {showActionMenu && (
+                        <>
+                            <div className="fixed inset-0 z-40" onClick={() => setShowActionMenu(false)}></div>
+                            <div className="absolute right-0 top-14 w-56 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <button onClick={() => { setShowActionMenu(false); setIsAddPatientModalOpen(true); }} className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-3 text-slate-700 dark:text-slate-200">
+                                    <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><span className="material-symbols-outlined text-lg">person_add</span></div>
+                                    <span className="font-medium text-sm">Novo Paciente</span>
+                                </button>
+                                <button onClick={() => { setShowActionMenu(false); setPatientSearchTerm(''); setIsPatientSelectorOpen(true); }} className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-3 text-slate-700 dark:text-slate-200 border-t border-slate-100 dark:border-slate-700">
+                                    <div className="p-1.5 bg-emerald-100 text-emerald-600 rounded-lg"><span className="material-symbols-outlined text-lg">vaccines</span></div>
+                                    <span className="font-medium text-sm">Registrar Dose</span>
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto">
-                {doses.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center p-12 text-center text-slate-400">
-                        <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-3">
-                            <span className="material-symbols-outlined text-3xl">event_busy</span>
+            {/* Menu Rápido (VOLTOU!) */}
+            <div className="grid grid-cols-4 gap-3 md:gap-4">
+                <QuickAction icon="group" label="Pacientes" color="blue" onClick={() => setView('patients')} />
+                <QuickAction icon="calendar_today" label="Agenda" color="indigo" onClick={() => setView('schedule')} />
+                <QuickAction icon="account_balance_wallet" label="Finanças" color="emerald" onClick={() => setView('financials')} />
+                <QuickAction icon="inventory_2" label="Estoque" color="amber" onClick={() => setView('medications')} />
+            </div>
+
+            {/* Cards de Estatísticas */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <StatCard icon="vaccines" label="Doses Hoje" value={stats.dosesToday} color="blue" />
+                <StatCard icon="warning" label="Em Atraso" value={stats.delayedDoses} color="rose" />
+                <StatCard icon="attach_money" label="Receita Mês" value={stats.monthlyRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} color="emerald" />
+            </div>
+
+            {/* Fila de Atendimento */}
+            <div>
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        Fila de Atendimento
+                        {stats.dosesToday > 0 && <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-xs font-bold">{stats.dosesToday}</span>}
+                    </h2>
+                </div>
+
+                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm divide-y divide-slate-100 dark:divide-slate-700">
+                    {loading ? (
+                        <div className="p-8 text-center text-slate-400">Carregando fila...</div>
+                    ) : todaysDoses.length === 0 ? (
+                        <div className="p-12 text-center flex flex-col items-center justify-center text-slate-400">
+                            <span className="material-symbols-outlined text-4xl mb-2 opacity-50">event_available</span>
+                            <p>Nenhuma dose agendada para hoje.</p>
                         </div>
-                        <span className="text-sm font-medium">Nenhum agendamento próximo.</span>
-                    </div>
-                ) : (
-                    <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                        {doses.map((dose) => {
-                            const patient = dose.patients;
-                            if (!patient) return null;
-                            const dateObj = new Date(dose.scheduled_at);
-                            const day = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
-
-                            // Tag Logic
-                            const patientTags = patient.tags || [];
-                            const firstTagId = patientTags.length > 0 ? patientTags[0] : null;
-                            const tagDef = firstTagId ? clinicTags.find(t => t.id === firstTagId) : null;
-                            const tagColor = tagDef ? TAG_COLORS.find(c => c.name === tagDef.color) : null;
-
-                            // Determine status dot color (Semantic)
-                            const getStatusDotColor = (status: string) => {
-                                switch (status) {
-                                    case 'Aguardando': return 'bg-amber-500';
-                                    case 'Agendado': return 'bg-blue-500';
-                                    case 'Concluído': return 'bg-emerald-500';
-                                    case 'Atrasado': return 'bg-rose-500';
-                                    default: return 'bg-slate-400';
-                                }
-                            };
-
-                            // Get Badge Style: Priority to Patient Tag, fallback to Semesteric Status
-                            let badgeStyle = '';
-
-                            if (tagColor) {
-                                // If patient has a tag, use its color for the badge
-                                badgeStyle = `${tagColor.bg} ${tagColor.text} ${tagColor.border} ring-1 ring-inset ${tagColor.border}`;
-                            } else {
-                                // Fallback to semantic status colors
-                                switch (dose.status) {
-                                    case 'Aguardando': badgeStyle = 'bg-amber-50 text-amber-700 ring-1 ring-amber-600/20 dark:bg-amber-900/30 dark:text-amber-400'; break;
-                                    case 'Agendado': badgeStyle = 'bg-blue-50 text-blue-700 ring-1 ring-blue-600/20 dark:bg-blue-900/30 dark:text-blue-400'; break;
-                                    case 'Concluído': badgeStyle = 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20 dark:bg-emerald-900/30 dark:text-emerald-400'; break;
-                                    case 'Atrasado': badgeStyle = 'bg-rose-50 text-rose-700 ring-1 ring-rose-600/20 dark:bg-rose-900/30 dark:text-rose-400'; break;
-                                    default: badgeStyle = 'bg-slate-100 text-slate-600 ring-1 ring-slate-500/10 dark:bg-slate-800 dark:text-slate-400';
-                                }
-                            }
-
-                            return (
-                                <div
-                                    key={dose.id}
-                                    className="group flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-all cursor-pointer relative"
-                                    onClick={() => onViewPatient(patient)}
-                                >
-                                    {/* Left accent bar on hover */}
-                                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary scale-y-0 group-hover:scale-y-100 transition-transform origin-center"></div>
-
-                                    <div className="flex items-center gap-4">
-                                        {/* Avatar */}
-                                        <div className="relative">
-                                            {patient.avatar_url ? (
-                                                <div className="h-10 w-10 md:h-12 md:w-12 rounded-full bg-cover bg-center ring-2 ring-white dark:ring-slate-800 shadow-sm" style={{ backgroundImage: `url('${patient.avatar_url}')` }}></div>
-                                            ) : (
-                                                <div className={`h-10 w-10 md:h-12 md:w-12 rounded-full flex items-center justify-center text-slate-500 dark:text-slate-300 font-bold text-sm md:text-base ring-2 ring-white dark:ring-slate-800 shadow-sm ${tagColor ? tagColor.bg : 'bg-slate-100 dark:bg-slate-700'}`}>
-                                                    <span className={tagColor ? tagColor.text : ''}>{patient.initials}</span>
-                                                </div>
-                                            )}
-                                            {/* Status Dot */}
-                                            <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-slate-800 ${getStatusDotColor(dose.status)} shadow-sm`}></div>
-                                        </div>
-
-                                        {/* Info */}
-                                        <div className="flex flex-col">
-                                            <span className="text-sm md:text-base font-bold text-slate-900 dark:text-white group-hover:text-primary transition-colors line-clamp-1">
-                                                {patient.name}
-                                            </span>
-                                            {/* Badge */}
-                                            <div className="flex items-center gap-2 mt-1">
-                                                <span className={`text-[10px] md:text-xs font-bold px-2.5 py-1 rounded-lg whitespace-nowrap ${badgeStyle}`}>
-                                                    {tagDef ? tagDef.name : dose.status}
-                                                </span>
-                                            </div>
-                                        </div>
+                    ) : (
+                        todaysDoses.map((item: any) => (
+                            <div key={item.id} className="p-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors group cursor-pointer" onClick={() => {
+                                const p = { id: item.patient_id, name: item.patients?.name, initials: item.patients?.initials, avatarUrl: item.patients?.avatar_url } as Patient;
+                                onViewPatient(p); // Redireciona para o perfil usando a função do App.tsx
+                            }}>
+                                <div className="flex items-center gap-4">
+                                    <div className="w-1.5 h-10 bg-blue-500 rounded-full"></div>
+                                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold overflow-hidden border border-slate-200">
+                                        {item.patients?.avatar_url ? <img src={item.patients.avatar_url} className="w-full h-full object-cover" /> : item.patients?.initials}
                                     </div>
-
-                                    {/* Date */}
-                                    <div className="flex flex-col items-end pl-2">
-                                        <span className="text-xs md:text-sm font-semibold text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md whitespace-nowrap border border-slate-100 dark:border-slate-700">
-                                            {day}
-                                        </span>
+                                    <div>
+                                        <h4 className="font-bold text-slate-900 dark:text-white text-sm">{item.patients?.name}</h4>
+                                        <div className="flex items-center gap-2 mt-0.5">
+                                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 uppercase border border-emerald-200">
+                                                {item.dose_label || `${item.order_index}ª dose`}
+                                            </span>
+                                            <span className="text-xs text-slate-500">{item.dosage}</span>
+                                        </div>
                                     </div>
                                 </div>
-                            );
-                        })}
-                    </div>
-                )}
+                                <div className="flex items-center gap-3">
+                                    <button className="px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-bold rounded-lg hover:bg-blue-100 transition-colors">Ver Perfil</button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
             </div>
+
+            {/* --- MODAIS DE AÇÃO --- */}
+
+            {/* Modal de Seleção de Paciente */}
+            {isPatientSelectorOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md shadow-2xl p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Selecione o Paciente</h3>
+                            <button onClick={() => setIsPatientSelectorOpen(false)} className="text-slate-400 hover:text-slate-600"><span className="material-symbols-outlined">close</span></button>
+                        </div>
+
+                        <div className="relative mb-6">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 material-symbols-outlined">search</span>
+                            <input
+                                type="text"
+                                placeholder="Buscar por nome..."
+                                className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                value={patientSearchTerm}
+                                onChange={(e) => setPatientSearchTerm(e.target.value)}
+                                autoFocus
+                            />
+                        </div>
+
+                        <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                            {patientSearchResults.length > 0 ? (
+                                patientSearchResults.map(p => (
+                                    <button
+                                        key={p.id}
+                                        onClick={() => handleSelectPatient(p)}
+                                        className="w-full flex items-center gap-3 p-3 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-xl transition-colors text-left group"
+                                    >
+                                        <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold">
+                                            {p.initials}
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-slate-900 dark:text-white group-hover:text-blue-700">{p.name}</p>
+                                            <p className="text-xs text-slate-500">CPF: {p.cpf || '---'}</p>
+                                        </div>
+                                        <span className="ml-auto material-symbols-outlined text-slate-300 group-hover:text-blue-500">add_circle</span>
+                                    </button>
+                                ))
+                            ) : patientSearchTerm.length > 1 ? (
+                                <div className="text-center py-4 text-slate-400">Nenhum paciente encontrado.</div>
+                            ) : (
+                                <div className="text-center py-4 text-slate-400 text-sm">Digite para buscar...</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isDoseModalOpen && selectedPatientForDose && (
+                <GlobalRegisterDoseModal isOpen={isDoseModalOpen} onClose={() => { setIsDoseModalOpen(false); setSelectedPatientForDose(null); }} onSuccess={() => { fetchDashboardData(); setIsDoseModalOpen(false); setSelectedPatientForDose(null); }} initialPatient={selectedPatientForDose} />
+            )}
+
+            {isAddPatientModalOpen && <AddPatientModal isOpen={isAddPatientModalOpen} onClose={() => setIsAddPatientModalOpen(false)} onSuccess={() => { fetchDashboardData(); setIsAddPatientModalOpen(false); }} />}
         </div>
     );
 };
 
-interface DashboardPageProps {
-    onViewPatient: (patientId: string) => void;
-    onAdministerDose: (patient: Patient) => void;
-    onAddPatient: () => void;
-    setView: (view: View) => void;
-}
-
-const DashboardPage: React.FC<DashboardPageProps> = ({ onViewPatient, onAdministerDose, onAddPatient, setView }) => {
-    const [stats, setStats] = useState({
-        dosesToday: '0',
-        overduePayments: '0',
-        estimatedRevenue: '0'
-    });
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        const fetchStats = async () => {
-            setLoading(true);
-            try {
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const nextDay = new Date(today);
-                nextDay.setDate(today.getDate() + 1);
-
-                // 1. Doses Today
-                const { count: dosesToday } = await supabase
-                    .from('upcoming_doses')
-                    .select('*', { count: 'exact', head: true })
-                    .gte('scheduled_at', today.toISOString())
-                    .lt('scheduled_at', nextDay.toISOString());
-
-                // 2. Overdue Payments
-                const { count: overduePayments } = await supabase
-                    .from('financial_records')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('status', 'Atrasado');
-
-                // 3. Estimated Revenue (Sum of paid records this month)
-                const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-                const { data: revenueData } = await supabase
-                    .from('financial_records')
-                    .select('amount')
-                    .eq('status', 'Pago')
-                    .gte('created_at', startOfMonth.toISOString());
-
-                const totalRevenue = (revenueData || []).reduce((acc, curr) => acc + Number(curr.amount), 0);
-
-                setStats({
-                    dosesToday: (dosesToday || 0).toString(),
-                    overduePayments: (overduePayments || 0).toString(),
-                    estimatedRevenue: `R$ ${(totalRevenue / 1000).toFixed(1)}k`
-                });
-            } catch (err) {
-                console.error('Error fetching dashboard stats:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchStats();
-    }, []);
+const QuickAction: React.FC<{ icon: string, label: string, color: string, onClick: () => void }> = ({ icon, label, color, onClick }) => {
+    const colors: any = { blue: 'bg-blue-50 text-blue-600 hover:bg-blue-100', indigo: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100', emerald: 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100', amber: 'bg-amber-50 text-amber-600 hover:bg-amber-100' };
     return (
-        <div className="flex flex-col gap-8">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Painel de Controle</h2>
-                    <p className="text-slate-500 dark:text-slate-400 mt-1">Protocolo Tirzepatida • {new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                </div>
-                <button
-                    onClick={onAddPatient}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white px-6 py-3 rounded-xl text-sm font-bold transition-all shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:-translate-y-0.5 active:scale-95 active:translate-y-0"
-                >
-                    <span className="material-symbols-outlined text-[20px]">add_circle</span>
-                    Novo Paciente
-                </button>
+        <button onClick={onClick} className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl transition-all hover:scale-105 active:scale-95 ${colors[color]}`}>
+            <span className="material-symbols-outlined text-3xl">{icon}</span>
+            <span className="text-[10px] md:text-xs font-bold uppercase">{label}</span>
+        </button>
+    );
+};
+
+const StatCard: React.FC<{ icon: string, label: string, value: string | number, color: string }> = ({ icon, label, value, color }) => {
+    const bgColors: any = { blue: 'bg-blue-600 shadow-blue-500/30', rose: 'bg-rose-500 shadow-rose-500/30', emerald: 'bg-emerald-500 shadow-emerald-500/30' };
+    const textColors: any = { blue: 'text-blue-100', rose: 'text-rose-100', emerald: 'text-emerald-100' };
+    return (
+        <div className={`${bgColors[color]} text-white p-5 rounded-2xl shadow-lg relative overflow-hidden group`}>
+            <div className="relative z-10">
+                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center mb-3 backdrop-blur-sm"><span className="material-symbols-outlined">{icon}</span></div>
+                <p className={`${textColors[color]} text-xs font-bold uppercase tracking-wider`}>{label}</p>
+                <h3 className="text-3xl font-black mt-0.5">{value}</h3>
             </div>
-
-
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                    { label: 'Pacientes', view: 'patients', icon: 'group', color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20', ring: 'group-hover:ring-blue-500/50', gradient: 'from-blue-500/5 to-blue-600/10' },
-                    { label: 'Agenda', view: 'schedule', icon: 'calendar_today', color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-900/20', ring: 'group-hover:ring-emerald-500/50', gradient: 'from-emerald-500/5 to-emerald-600/10' },
-                    { label: 'Medicações', view: 'medications', icon: 'medication', color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-50 dark:bg-violet-900/20', ring: 'group-hover:ring-violet-500/50', gradient: 'from-violet-500/5 to-violet-600/10' },
-                    { label: 'Financeiro', view: 'financials', icon: 'payments', color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20', ring: 'group-hover:ring-amber-500/50', gradient: 'from-amber-500/5 to-amber-600/10' },
-                ].map((action) => (
-                    <button
-                        key={action.view}
-                        onClick={() => setView(action.view as View)}
-                        className={`group relative flex flex-col justify-between p-5 h-32 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-all duration-300 hover:shadow-xl hover:-translate-y-1 overflow-hidden ring-1 ring-transparent ${action.ring}`}
-                    >
-                        <div className={`absolute inset-0 bg-gradient-to-br ${action.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
-
-                        <div className={`absolute -right-4 -bottom-4 opacity-0 group-hover:opacity-10 transition-all duration-500 scale-150 rotate-12`}>
-                            <span className={`material-symbols-outlined text-8xl ${action.color}`}>{action.icon}</span>
-                        </div>
-
-                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${action.bg} ${action.color} shadow-sm group-hover:scale-110 transition-transform duration-300 relative z-10`}>
-                            <span className="material-symbols-outlined text-2xl">{action.icon}</span>
-                        </div>
-
-                        <div className="text-left relative z-10">
-                            <span className="block font-bold text-slate-700 dark:text-slate-100 text-lg tracking-tight group-hover:translate-x-1 transition-transform">{action.label}</span>
-                        </div>
-                    </button>
-                ))}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <StatCard title="Doses Hoje" value={stats.dosesToday} unit="pacientes" change="+0%" changeType="positive" icon="vaccines" theme="primary" />
-                <StatCard title="Em Atraso" value={stats.overduePayments} unit="registros" actionText={stats.overduePayments !== '0' ? "Ação Necessária" : undefined} icon="event_busy" theme="danger" />
-                <StatCard title="Receita (Mês)" value={stats.estimatedRevenue} unit="líquido" change="+0%" changeType="positive" icon="payments" theme="success" />
-            </div>
-
-            {/* Upcoming Doses Table - Modern & Minimal */}
-            <div className="lg:col-span-2 min-h-[400px]">
-                <UpcomingDosesTable onViewPatient={onViewPatient} onAdministerDose={onAdministerDose} setView={setView} />
-            </div>
-
-            <div className="mt-4 rounded-xl bg-blue-50 dark:bg-slate-800/50 border border-blue-100 dark:border-slate-700 p-4 flex gap-3 items-start">
-                <span className="material-symbols-outlined text-blue-500 shrink-0 mt-0.5">info</span>
-                <div className="text-sm text-slate-600 dark:text-slate-400">
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">Aviso Legal:</span>
-                    Esta ferramenta auxilia no acompanhamento clínico, mas não substitui o julgamento médico profissional. Confirme as alergias do paciente e a dosagem correta antes da administração de qualquer medicamento. O uso deste software implica na aceitação dos termos de responsabilidade clínica.
-                </div>
-            </div>
-        </div >
+            <span className="material-symbols-outlined absolute -bottom-4 -right-4 text-[100px] text-white opacity-10 group-hover:scale-110 transition-transform duration-500">{icon}</span>
+        </div>
     );
 };
 
