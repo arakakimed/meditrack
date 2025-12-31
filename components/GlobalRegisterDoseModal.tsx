@@ -45,24 +45,76 @@ const GlobalRegisterDoseModal: React.FC<GlobalRegisterDoseModalProps> = ({
 
     const searchRef = useRef<HTMLDivElement>(null);
     const [showResults, setShowResults] = useState(false);
+    const [allPatients, setAllPatients] = useState<any[]>([]); // Cache all patients
 
+    // Load ALL patients when modal opens
     useEffect(() => {
-        const fetchPatients = async () => {
-            if (searchQuery.length < 2) {
-                setPatients([]);
-                return;
+        if (!isOpen) {
+            // Reset state when modal closes
+            setAllPatients([]);
+            setPatients([]);
+            setSearchQuery('');
+            setShowResults(false);
+            return;
+        }
+
+        // If we already have a patient pre-selected (from PatientProfilePage), skip loading
+        if (initialPatient) {
+            console.log('[DEBUG] Patient already selected:', initialPatient.name);
+            return;
+        }
+
+        // Fetch all patients for the autocomplete
+        const fetchAllPatients = async () => {
+            console.log('[DEBUG] Fetching all patients...');
+            try {
+                const { data, error } = await supabase
+                    .from('patients')
+                    .select('id, name, avatar_url, initials, current_weight')
+                    .order('name');
+
+                if (error) {
+                    console.error('[DEBUG] Error fetching patients:', error);
+                    return;
+                }
+
+                console.log('[DEBUG] Loaded patients:', data?.length || 0);
+                setAllPatients(data || []);
+                setPatients((data || []).slice(0, 8));
+                setShowResults(true); // Show dropdown automatically
+            } catch (err) {
+                console.error('[DEBUG] Fetch error:', err);
             }
-            const { data } = await supabase
-                .from('patients')
-                .select('*')
-                .ilike('name', `%${searchQuery}%`)
-                .limit(5);
-            setPatients(data || []);
         };
 
-        const timer = setTimeout(fetchPatients, 300);
-        return () => clearTimeout(timer);
-    }, [searchQuery]);
+        fetchAllPatients();
+    }, [isOpen, initialPatient]);
+
+    // Filter patients locally based on search query
+    useEffect(() => {
+        if (!searchQuery.trim()) {
+            setPatients(allPatients.slice(0, 8)); // Show first 8 when no query
+        } else {
+            const query = searchQuery.toLowerCase();
+            const filtered = allPatients.filter(p =>
+                p.name.toLowerCase().includes(query)
+            ).slice(0, 8);
+            setPatients(filtered);
+        }
+    }, [searchQuery, allPatients]);
+
+    // Click outside handler to close dropdown
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+                setShowResults(false);
+            }
+        };
+        if (showResults) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showResults]);
 
     useEffect(() => {
         const fetchMedications = async () => {
@@ -427,10 +479,15 @@ const GlobalRegisterDoseModal: React.FC<GlobalRegisterDoseModalProps> = ({
                 </div>
 
                 <form onSubmit={handleSubmit} className="p-4 md:p-6 overflow-y-auto max-h-[80vh] space-y-4 md:space-y-6">
-                    {/* Patient Search */}
+                    {/* Patient Search - Autocomplete */}
                     <div className="relative" ref={searchRef}>
-                        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Buscar Paciente</label>
+                        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                            Buscar Paciente
+                        </label>
                         <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                                <span className="material-symbols-outlined text-lg">search</span>
+                            </span>
                             <input
                                 type="text"
                                 value={selectedPatient ? selectedPatient.name : searchQuery}
@@ -440,41 +497,91 @@ const GlobalRegisterDoseModal: React.FC<GlobalRegisterDoseModalProps> = ({
                                     setShowResults(true);
                                 }}
                                 onFocus={() => setShowResults(true)}
-                                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-primary/20 outline-none text-slate-900 dark:text-white"
+                                className={`w-full pl-12 pr-12 py-3 rounded-xl border ${selectedPatient ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900'} focus:ring-2 focus:ring-primary/20 outline-none text-slate-900 dark:text-white transition-colors`}
                                 placeholder="Digite o nome do paciente..."
                                 autoComplete="off"
                             />
-                            {selectedPatient && (
+                            {selectedPatient ? (
                                 <button
                                     type="button"
-                                    onClick={() => setSelectedPatient(null)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500"
+                                    onClick={() => {
+                                        setSelectedPatient(null);
+                                        setSearchQuery('');
+                                        setShowResults(true);
+                                    }}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500 transition-colors"
                                 >
                                     <span className="material-symbols-outlined">cancel</span>
+                                </button>
+                            ) : searchQuery && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSearchQuery('')}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                                >
+                                    <span className="material-symbols-outlined text-sm">close</span>
                                 </button>
                             )}
                         </div>
 
-                        {showResults && patients.length > 0 && !selectedPatient && (
-                            <div className="absolute z-50 w-full mt-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
-                                {patients.map(p => (
-                                    <div
-                                        key={p.id}
-                                        onClick={() => {
-                                            setSelectedPatient(p);
-                                            setShowResults(false);
-                                        }}
-                                        className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-3 transition-colors"
-                                    >
-                                        <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
-                                            {p.initials}
-                                        </div>
-                                        <div className="flex flex-col">
-                                            <span className="text-sm font-semibold text-slate-900 dark:text-white">{p.name}</span>
-                                            <span className="text-[10px] text-slate-500 italic">ID: {p.id.substring(0, 8)}</span>
-                                        </div>
+                        {/* Dropdown Results */}
+                        {showResults && !selectedPatient && (
+                            <div className="absolute z-50 w-full mt-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden max-h-72 overflow-y-auto">
+                                {allPatients.length === 0 ? (
+                                    <div className="px-4 py-6 text-center text-slate-400">
+                                        <span className="material-symbols-outlined text-3xl mb-2 block opacity-50">hourglass_empty</span>
+                                        <span className="text-sm">Carregando pacientes...</span>
                                     </div>
-                                ))}
+                                ) : patients.length === 0 ? (
+                                    <div className="px-4 py-6 text-center text-slate-400">
+                                        <span className="material-symbols-outlined text-3xl mb-2 block opacity-50">search_off</span>
+                                        <span className="text-sm">Nenhum paciente encontrado</span>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border-b border-slate-100 dark:border-slate-700">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase">
+                                                {searchQuery ? `Resultados para "${searchQuery}"` : 'Pacientes recentes'}
+                                            </span>
+                                        </div>
+                                        {patients.map((p, index) => (
+                                            <div
+                                                key={p.id}
+                                                onClick={() => {
+                                                    setSelectedPatient(p);
+                                                    setSearchQuery('');
+                                                    setShowResults(false);
+                                                }}
+                                                className={`px-4 py-3 hover:bg-blue-50 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-3 transition-colors border-b border-slate-50 dark:border-slate-700/50 last:border-b-0 ${index === 0 ? 'bg-blue-50/50 dark:bg-slate-700/30' : ''}`}
+                                            >
+                                                {/* Avatar */}
+                                                {p.avatar_url ? (
+                                                    <img
+                                                        src={p.avatar_url}
+                                                        alt={p.name}
+                                                        className="w-10 h-10 rounded-full object-cover ring-2 ring-white dark:ring-slate-700 shadow-sm"
+                                                    />
+                                                ) : (
+                                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center text-sm font-bold shadow-sm">
+                                                        {p.initials || p.name?.charAt(0)?.toUpperCase() || '?'}
+                                                    </div>
+                                                )}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">{p.name}</div>
+                                                    <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                                        {p.current_weight && (
+                                                            <span className="flex items-center gap-0.5">
+                                                                <span className="material-symbols-outlined text-[10px]">monitor_weight</span>
+                                                                {p.current_weight} kg
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <span className="material-symbols-outlined text-slate-300 dark:text-slate-600 text-lg">chevron_right</span>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
                             </div>
                         )}
                     </div>

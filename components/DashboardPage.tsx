@@ -99,7 +99,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
                             <div className="fixed inset-0 z-40" onClick={() => setShowActionMenu(false)}></div>
                             <div className="absolute right-0 top-14 w-56 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
                                 <button onClick={() => { setShowActionMenu(false); onAddPatient(); }} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium text-sm"><span className="material-symbols-outlined text-blue-600">person_add</span> Novo Paciente</button>
-                                <button onClick={() => { setShowActionMenu(false); setPatientSearchTerm(''); setIsPatientSelectorOpen(true); }} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium text-sm border-t border-slate-100"><span className="material-symbols-outlined text-emerald-600">vaccines</span> Registrar Dose</button>
+                                <button onClick={() => { setShowActionMenu(false); setSelectedPatientForDose(null); setIsDoseModalOpen(true); }} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium text-sm border-t border-slate-100"><span className="material-symbols-outlined text-emerald-600">vaccines</span> Registrar Dose</button>
                             </div>
                         </>
                     )}
@@ -170,41 +170,31 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
                 </div>
             </div>
 
-            {/* Modal de Busca de Paciente */}
-            {isPatientSelectorOpen && (
-                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 overflow-hidden">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-lg font-bold text-slate-900">Registrar Dose</h3>
-                            <button onClick={() => setIsPatientSelectorOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors"><span className="material-symbols-outlined">close</span></button>
-                        </div>
-                        <input
-                            type="text"
-                            placeholder="Buscar paciente..."
-                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                            value={patientSearchTerm}
-                            onChange={(e) => setPatientSearchTerm(e.target.value)}
-                            autoFocus
-                        />
-                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                            {patientSearchResults.map(p => (
-                                <button key={p.id} onClick={() => { setSelectedPatientForDose(p); setIsPatientSelectorOpen(false); setIsDoseModalOpen(true); }} className="w-full flex items-center gap-3 p-3 hover:bg-blue-50 rounded-xl transition-all text-left border border-transparent hover:border-blue-100">
-                                    <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold">{p.initials}</div>
-                                    <div className="flex-1 font-bold text-slate-900">{p.name}</div>
-                                    <span className="material-symbols-outlined text-slate-300 group-hover:text-blue-500">add_circle</span>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {isDoseModalOpen && selectedPatientForDose && (
+            {/* Modal Global de Registro de Dose - Abre diretamente sem pré-seleção */}
+            {isDoseModalOpen && (
                 <GlobalRegisterDoseModal
                     isOpen={isDoseModalOpen}
                     onClose={() => { setIsDoseModalOpen(false); setSelectedPatientForDose(null); }}
-                    onSuccess={() => { fetchDashboardData(); setIsDoseModalOpen(false); setSelectedPatientForDose(null); }}
-                    initialPatient={selectedPatientForDose}
+                    onSuccess={(newInjection) => {
+                        setIsDoseModalOpen(false);
+                        fetchDashboardData();
+                        // Navegar para o perfil do paciente após sucesso
+                        if (newInjection?.patient_id) {
+                            // Buscar dados completos do paciente para navegação
+                            supabase
+                                .from('patients')
+                                .select('*')
+                                .eq('id', newInjection.patient_id)
+                                .single()
+                                .then(({ data: patientData }) => {
+                                    if (patientData) {
+                                        onViewPatient(patientData as Patient);
+                                    }
+                                });
+                        }
+                        setSelectedPatientForDose(null);
+                    }}
+                    initialPatient={selectedPatientForDose} // null quando aberto do header
                 />
             )}
         </div>

@@ -103,7 +103,7 @@ const MedicationPath: React.FC<{
                             <div className="flex items-center gap-2">
                                 {weightInfo && (
                                     <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-bold ${weightInfo.type === 'loss' ? 'bg-emerald-100 text-emerald-700' :
-                                            weightInfo.type === 'gain' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'
+                                        weightInfo.type === 'gain' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'
                                         }`}>
                                         {weightInfo.type === 'loss' && <span className="material-symbols-outlined text-[12px]">arrow_downward</span>}
                                         {weightInfo.type === 'gain' && <span className="material-symbols-outlined text-[12px]">arrow_upward</span>}
@@ -138,9 +138,9 @@ const InjectionHistoryTable: React.FC<{
     readonly?: boolean
 }> = ({ injections, onDelete, onEdit, onAddHistorical, onTogglePayment, highlightedDate, readonly }) => {
     const [expandedRow, setExpandedRow] = useState<number | null>(null);
+    const [isCollapsed, setIsCollapsed] = useState(true);
     const formatCurrency = (value: number) => value ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '-';
 
-    // Data Helper seguro
     const formatAestheticDate = (dateStr: string) => {
         try {
             if (!dateStr) return '';
@@ -154,59 +154,80 @@ const InjectionHistoryTable: React.FC<{
     };
 
     return (
-        <div className="lg:col-span-2 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col">
-            <div className="p-4 md:p-6 border-b border-slate-100 dark:border-slate-700 flex flex-wrap justify-between items-center gap-3">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Histórico de Aplicações</h3>
+        <div className="lg:col-span-2 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
+            {/* Header Clicável */}
+            <div
+                onClick={() => setIsCollapsed(!isCollapsed)}
+                className="p-4 md:p-6 border-b border-slate-100 dark:border-slate-700 flex flex-wrap justify-between items-center gap-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors select-none"
+            >
+                <div className="flex items-center gap-3">
+                    <span
+                        className="material-symbols-outlined text-slate-400 transition-transform duration-300"
+                        style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+                    >
+                        expand_more
+                    </span>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Histórico de Aplicações</h3>
+                    <span className="text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full">
+                        {injections.length}
+                    </span>
+                </div>
                 {!readonly && (
-                    <div className="flex flex-wrap gap-2">
-                        <button onClick={onAddHistorical} className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 border border-amber-200 transition-colors flex items-center gap-1.5">
+                    <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+                        <button onClick={onAddHistorical} className="px-4 py-2 text-xs font-bold text-amber-800 bg-gradient-to-r from-amber-100 to-orange-100 rounded-xl hover:from-amber-200 hover:to-orange-200 border border-amber-200/50 shadow-sm transition-all flex items-center gap-1.5 hover:scale-105 active:scale-95">
                             <span className="material-symbols-outlined text-sm">history</span><span>Adicionar Dose Histórica</span>
                         </button>
                     </div>
                 )}
             </div>
-            <div className="flex-1 overflow-x-auto">
-                {injections.length === 0 ? (
-                    <div className="p-12 text-center text-slate-400">Nenhuma aplicação registrada</div>
-                ) : (
-                    <div className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {injections.map((injection, index) => (
-                            <div key={index} className="transition-colors">
-                                <div onClick={() => setExpandedRow(expandedRow === index ? null : index)} className={`px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30 cursor-pointer transition-all ${highlightedDate === injection.applicationDate ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}>
-                                    <div className="grid grid-cols-[1fr,auto,auto,auto] md:grid-cols-[1.5fr,1fr,auto,auto] gap-3 items-center">
-                                        <div className="flex items-center gap-2 min-w-0">
-                                            {injection.isHistorical && <span className="material-symbols-outlined text-amber-500 text-sm flex-shrink-0" title="Dose histórica">history</span>}
-                                            <div className="min-w-0"><div className="text-sm font-medium text-slate-900 dark:text-white truncate">{formatAestheticDate(injection.date)}</div></div>
-                                            <button className="ml-auto text-slate-400 transition-transform" style={{ transform: expandedRow === index ? 'rotate(180deg)' : 'rotate(0deg)' }}><span className="material-symbols-outlined text-lg">expand_more</span></button>
-                                        </div>
-                                        <div className="text-sm font-semibold text-slate-900 dark:text-white text-center">{injection.dosage}</div>
-                                        <button onClick={(e) => { if (readonly) return; e.stopPropagation(); onTogglePayment(injection); }} className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ring-1 ring-inset transition-all ${injection.isPaid ? 'bg-green-50 text-green-700 ring-green-600/20' : 'bg-slate-100 text-slate-500 ring-slate-300'} ${!readonly ? 'hover:bg-opacity-80' : 'cursor-default opacity-80'}`}>
-                                            <span className="material-symbols-outlined text-xs">{injection.isPaid ? 'check_circle' : 'radio_button_unchecked'}</span><span className="hidden sm:inline">{injection.isPaid ? 'Pago' : 'Pendente'}</span>
-                                        </button>
-                                        <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-bold ring-1 ring-inset ${injection.status === 'Aplicada' ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20' : 'bg-slate-50 text-slate-700 ring-slate-600/20'}`}>{injection.status}</span>
-                                    </div>
-                                </div>
-                                {expandedRow === index && (
-                                    <div className="px-4 py-4 bg-gradient-to-br from-slate-50/80 to-slate-100/50 dark:from-slate-800/20 dark:to-slate-900/20 border-t border-slate-200 dark:border-slate-700 animate-in slide-in-from-top-2">
-                                        <div className="space-y-3">
-                                            <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between items-center">
-                                                <div className="flex items-center gap-2"><span className="material-symbols-outlined text-lg text-slate-500">payments</span><span className="text-xs font-semibold text-slate-600 uppercase">Valor</span></div>
-                                                <span className="text-lg font-mono font-bold text-slate-900 dark:text-white">{formatCurrency(injection.doseValue || 0)}</span>
+
+            {/* Conteúdo Colapsável com Animação */}
+            <div
+                className={`transition-all duration-300 ease-in-out overflow-hidden ${isCollapsed ? 'max-h-0 opacity-0' : 'max-h-[2000px] opacity-100'}`}
+            >
+                <div className="flex-1 overflow-x-auto">
+                    {injections.length === 0 ? (
+                        <div className="p-12 text-center text-slate-400">Nenhuma aplicação registrada</div>
+                    ) : (
+                        <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                            {injections.map((injection, index) => (
+                                <div key={index} className="transition-colors">
+                                    <div onClick={() => setExpandedRow(expandedRow === index ? null : index)} className={`px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30 cursor-pointer transition-all ${highlightedDate === injection.applicationDate ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}>
+                                        <div className="grid grid-cols-[1fr,auto,auto,auto] md:grid-cols-[1.5fr,1fr,auto,auto] gap-3 items-center">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                {injection.isHistorical && <span className="material-symbols-outlined text-amber-500 text-sm flex-shrink-0" title="Dose histórica">history</span>}
+                                                <div className="min-w-0"><div className="text-sm font-medium text-slate-900 dark:text-white truncate">{formatAestheticDate(injection.date)}</div></div>
+                                                <button className="ml-auto text-slate-400 transition-transform" style={{ transform: expandedRow === index ? 'rotate(180deg)' : 'rotate(0deg)' }}><span className="material-symbols-outlined text-lg">expand_more</span></button>
                                             </div>
-                                            {injection.notes && <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200"><p className="text-sm text-slate-700">{injection.notes}</p></div>}
-                                            {!readonly && (
-                                                <div className="grid grid-cols-2 gap-2 pt-1">
-                                                    <button onClick={(e) => { e.stopPropagation(); onEdit(injection); }} className="px-3 py-2 bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2"><span className="material-symbols-outlined text-sm">edit</span> Editar</button>
-                                                    <button onClick={(e) => { e.stopPropagation(); injection.id && onDelete(injection.id, injection); }} className="px-3 py-2 bg-red-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2"><span className="material-symbols-outlined text-sm">delete</span> Excluir</button>
-                                                </div>
-                                            )}
+                                            <div className="text-sm font-semibold text-slate-900 dark:text-white text-center">{injection.dosage}</div>
+                                            <button onClick={(e) => { if (readonly) return; e.stopPropagation(); onTogglePayment(injection); }} className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ring-1 ring-inset transition-all ${injection.isPaid ? 'bg-green-50 text-green-700 ring-green-600/20' : 'bg-slate-100 text-slate-500 ring-slate-300'} ${!readonly ? 'hover:bg-opacity-80' : 'cursor-default opacity-80'}`}>
+                                                <span className="material-symbols-outlined text-xs">{injection.isPaid ? 'check_circle' : 'radio_button_unchecked'}</span><span className="hidden sm:inline">{injection.isPaid ? 'Pago' : 'Pendente'}</span>
+                                            </button>
+                                            <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-bold ring-1 ring-inset ${injection.status === 'Aplicada' ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20' : 'bg-slate-50 text-slate-700 ring-slate-600/20'}`}>{injection.status}</span>
                                         </div>
                                     </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                )}
+                                    {expandedRow === index && (
+                                        <div className="px-4 py-4 bg-gradient-to-br from-slate-50/80 to-slate-100/50 dark:from-slate-800/20 dark:to-slate-900/20 border-t border-slate-200 dark:border-slate-700 animate-in slide-in-from-top-2">
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                                                    <div className="flex items-center gap-2"><span className="material-symbols-outlined text-lg text-slate-500">payments</span><span className="text-xs font-semibold text-slate-600 uppercase">Valor</span></div>
+                                                    <span className="text-lg font-mono font-bold text-slate-900 dark:text-white">{formatCurrency(injection.doseValue || 0)}</span>
+                                                </div>
+                                                {injection.notes && <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200"><p className="text-sm text-slate-700">{injection.notes}</p></div>}
+                                                {!readonly && (
+                                                    <div className="grid grid-cols-2 gap-2 pt-1">
+                                                        <button onClick={(e) => { e.stopPropagation(); onEdit(injection); }} className="px-3 py-2 bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2"><span className="material-symbols-outlined text-sm">edit</span> Editar</button>
+                                                        <button onClick={(e) => { e.stopPropagation(); injection.id && onDelete(injection.id, injection); }} className="px-3 py-2 bg-red-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2"><span className="material-symbols-outlined text-sm">delete</span> Excluir</button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );
@@ -237,6 +258,7 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
     const [isConfirmDeleteModalOpen, setIsConfirmDeleteModalOpen] = useState(false);
     const [injectionToDelete, setInjectionToDelete] = useState<{ id: string; name: string } | null>(null);
     const [stepToDelete, setStepToDelete] = useState<MedicationStep | null>(null);
+    const [isJourneyCollapsed, setIsJourneyCollapsed] = useState(true);
     const [isDeleting, setIsDeleting] = useState(false);
     const [highlightedDate, setHighlightedDate] = useState<string | null>(null);
 
@@ -301,11 +323,18 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
     const confirmDeleteStep = async () => { if (!stepToDelete || !stepToDelete.id) return; if (stepToDelete.status === 'Concluído') await supabase.from('injections').delete().eq('id', stepToDelete.id); else await supabase.from('medication_steps').delete().eq('id', stepToDelete.id); setIsConfirmDeleteModalOpen(false); fetchData(); setStepToDelete(null); };
     const confirmDelete = async () => { if (!injectionToDelete) return; await supabase.from('injections').delete().eq('id', injectionToDelete.id); setIsConfirmDeleteModalOpen(false); setInjectionToDelete(null); fetchData(); };
 
+    // --- FUNÇÃO SEGURA DE CALLBACK (Resolve Tela Branca) ---
+    const handleWeightSuccess = () => {
+        setIsAddWeightModalOpen(false); // Fecha primeiro
+        setTimeout(() => {
+            fetchData(); // Atualiza depois
+        }, 50);
+    };
+
     if (loading && medicationSteps.length === 0) return <div className="p-20 text-center text-slate-500">Carregando perfil...</div>;
 
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-20 md:pb-0">
-            {/* Header escondido se readonly */}
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-20 md:pb-0 relative">
             {!readonly && (
                 <div className="max-w-6xl mx-auto flex items-center gap-2 text-sm text-slate-500 pt-8 px-4">
                     <a href="#" onClick={(e) => { e.preventDefault(); onGoHome(); }} className="hover:underline opacity-60">Home</a>
@@ -337,22 +366,107 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
                     </div>
                 </section>
 
+                {/* Cards de Métricas */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
+                    <div className="relative overflow-hidden bg-gradient-to-br from-blue-500 to-blue-600 p-5 rounded-3xl shadow-lg shadow-blue-500/20 group transition-all hover:scale-[1.02]">
+                        <div className="relative z-10 flex flex-col h-full justify-between">
+                            <span className="text-blue-100 text-xs font-extrabold uppercase tracking-widest mb-1">Peso Atual</span>
+                            <div className="flex items-baseline gap-1">
+                                <span className="text-3xl md:text-5xl font-black text-white tracking-tighter filter drop-shadow-sm">{realPatient.currentWeight}</span>
+                                <span className="text-sm md:text-base font-bold text-blue-100/80">kg</span>
+                            </div>
+                        </div>
+                        <div className="absolute -right-6 -bottom-6 text-white/10 group-hover:text-white/20 transition-all group-hover:scale-110 group-hover:rotate-6">
+                            <span className="material-symbols-outlined text-[100px] leading-none">monitor_weight</span>
+                        </div>
+                    </div>
+                    <div className="relative overflow-hidden bg-gradient-to-br from-indigo-500 to-purple-600 p-5 rounded-3xl shadow-lg shadow-purple-500/20 group transition-all hover:scale-[1.02]">
+                        <div className="relative z-10 flex flex-col h-full justify-between">
+                            <span className="text-indigo-100 text-xs font-extrabold uppercase tracking-widest mb-1">Meta</span>
+                            <div className="flex items-baseline gap-1">
+                                <span className="text-3xl md:text-5xl font-black text-white tracking-tighter filter drop-shadow-sm">{realPatient.targetWeight || '--'}</span>
+                                {realPatient.targetWeight && <span className="text-sm md:text-base font-bold text-indigo-100/80">kg</span>}
+                            </div>
+                        </div>
+                        <div className="absolute -right-6 -bottom-6 text-white/10 group-hover:text-white/20 transition-all group-hover:scale-110 group-hover:rotate-6">
+                            <span className="material-symbols-outlined text-[100px] leading-none">flag</span>
+                        </div>
+                    </div>
+                    <div className="relative overflow-hidden bg-gradient-to-br from-teal-500 to-emerald-600 p-5 rounded-3xl shadow-lg shadow-teal-500/20 group transition-all hover:scale-[1.02]">
+                        <div className="relative z-10 flex flex-col h-full justify-between">
+                            <div className="flex justify-between items-start">
+                                <span className="text-teal-100 text-xs font-extrabold uppercase tracking-widest mb-1">IMC</span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm ${(() => {
+                                    const h = realPatient.height ? (realPatient.height > 3 ? realPatient.height / 100 : realPatient.height) : 0;
+                                    const w = realPatient.currentWeight || 0;
+                                    if (!h || !w) return 'bg-white/20 text-white';
+                                    const bmi = w / (h * h);
+                                    if (bmi < 25) return 'bg-white text-emerald-600';
+                                    if (bmi < 30) return 'bg-white text-amber-600';
+                                    return 'bg-white text-rose-600';
+                                })()
+                                    }`}>
+                                    {(() => {
+                                        const h = realPatient.height ? (realPatient.height > 3 ? realPatient.height / 100 : realPatient.height) : 0;
+                                        const w = realPatient.currentWeight || 0;
+                                        if (!h || !w) return 'N/A';
+                                        const bmi = w / (h * h);
+                                        if (bmi < 18.5) return 'Abaixo';
+                                        if (bmi < 24.9) return 'Normal';
+                                        if (bmi < 29.9) return 'Sobrepeso';
+                                        if (bmi < 34.9) return 'Obesidade I';
+                                        return 'Obesidade II+';
+                                    })()}
+                                </span>
+                            </div>
+                            <div className="flex items-baseline gap-1 mt-1">
+                                <span className="text-3xl md:text-5xl font-black text-white tracking-tighter filter drop-shadow-sm">
+                                    {(realPatient.currentWeight && realPatient.height)
+                                        ? (realPatient.currentWeight / Math.pow((realPatient.height > 3 ? realPatient.height / 100 : realPatient.height), 2)).toFixed(1)
+                                        : '--'}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="absolute -right-6 -bottom-6 text-white/10 group-hover:text-white/20 transition-all group-hover:scale-110 group-hover:rotate-6">
+                            <span className="material-symbols-outlined text-[100px] leading-none">health_and_safety</span>
+                        </div>
+                    </div>
+                    <div className={`relative overflow-hidden p-5 rounded-3xl shadow-lg transition-all hover:scale-[1.02] group ${(realPatient.currentWeight - (realPatient.initialWeight || realPatient.currentWeight)) <= 0 ? 'bg-gradient-to-br from-gray-800 to-gray-900 shadow-gray-500/20' : 'bg-gradient-to-br from-rose-500 to-red-600 shadow-rose-500/20'}`}>
+                        <div className="relative z-10 flex flex-col h-full justify-between">
+                            <div className="flex flex-col">
+                                <span className="text-white/70 text-xs font-extrabold uppercase tracking-widest mb-1">Perda Total</span>
+                                <div className="flex items-baseline gap-1">
+                                    <span className={`text-3xl md:text-5xl font-black tracking-tighter filter drop-shadow-sm ${(realPatient.currentWeight - (realPatient.initialWeight || realPatient.currentWeight)) <= 0 ? 'text-emerald-400' : 'text-white'}`}>
+                                        {(realPatient.currentWeight - (realPatient.initialWeight || realPatient.currentWeight)).toFixed(1)}
+                                    </span>
+                                    <span className="text-sm md:text-base font-bold text-white/60">kg</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="absolute -right-6 -bottom-6 text-white/10 group-hover:text-white/15 transition-all group-hover:scale-110 group-hover:rotate-6">
+                            <span className="material-symbols-outlined text-[100px] leading-none">trending_down</span>
+                        </div>
+                    </div>
+                </div>
+
                 <div className="mb-8 group relative">
                     <WeightEvolutionChart
                         patient={realPatient}
                         weightHistory={weightHistory}
-                        onDeleteWeight={(point) => { if (!readonly && point.id) setWeightToDelete({ id: point.id, weight: point.weight, date: point.date }); }}
+                        onDeleteWeight={(point) => {
+                            if (point.id) {
+                                setWeightToDelete({ id: point.id, weight: point.weight, date: point.date });
+                            }
+                        }}
                         action={
                             <div className="flex items-center gap-2">
-                                {/* Botão Registrar DOSE - Só para Admin */}
                                 {!readonly && (
-                                    <button onClick={() => setIsHistoricalDoseModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 shadow-sm rounded-xl text-xs md:text-sm font-bold hover:bg-slate-50 transition-all hover:scale-105 active:scale-95">
+                                    <button onClick={() => setIsHistoricalDoseModalOpen(true)} className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-600 shadow-sm rounded-xl text-xs md:text-sm font-extrabold hover:border-blue-300 hover:text-blue-600 hover:shadow-md transition-all hover:scale-105 active:scale-95">
                                         <span className="material-symbols-outlined text-lg">vaccines</span>
                                         Registrar Dose
                                     </button>
                                 )}
-                                {/* Botão Registrar PESO - Visível para TODOS */}
-                                <button onClick={() => setIsAddWeightModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 shadow-md border border-blue-500 rounded-xl text-xs md:text-sm font-bold text-white hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 hover:shadow-lg">
+                                <button onClick={() => setIsAddWeightModalOpen(true)} className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg shadow-blue-500/30 border-none rounded-xl text-xs md:text-sm font-extrabold text-white hover:from-blue-700 hover:to-indigo-700 transition-all hover:scale-105 active:scale-95 hover:shadow-xl">
                                     <span className="material-symbols-outlined text-lg">add_circle</span>
                                     Registrar Peso
                                 </button>
@@ -364,15 +478,50 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
                 <PatientFinancials patient={realPatient} injections={injections} onUpdate={fetchData} />
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <div className="lg:col-span-1 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 overflow-hidden flex flex-col">
-                        <div className="flex justify-between items-center mb-6 flex-shrink-0"><h3 className="text-lg font-bold text-slate-900 dark:text-white">Jornada do Paciente</h3></div>
-                        <div className="overflow-y-auto pr-2 -mr-2 flex-1"><MedicationPath steps={journeySteps} onEditStep={handleEditStep} onAddStep={handleAddStep} onPaymentClick={handlePaymentClick} onDeleteStep={handleDeleteStep} paidStepIds={paidStepIds} patient={realPatient} readonly={readonly} /></div>
+                    {/* Jornada do Paciente - Collapsible */}
+                    <div className="lg:col-span-1 bg-surface-light dark:bg-surface-dark rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col">
+                        {/* Header Clicável */}
+                        <div
+                            onClick={() => setIsJourneyCollapsed(!isJourneyCollapsed)}
+                            className="p-6 flex justify-between items-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors select-none border-b border-slate-100 dark:border-slate-700"
+                        >
+                            <div className="flex items-center gap-3">
+                                <span
+                                    className="material-symbols-outlined text-slate-400 transition-transform duration-300"
+                                    style={{ transform: isJourneyCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+                                >
+                                    expand_more
+                                </span>
+                                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Jornada do Paciente</h3>
+                                <span className="text-xs font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full">
+                                    {journeySteps.length}
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Conteúdo Colapsável */}
+                        <div
+                            className={`transition-all duration-300 ease-in-out overflow-hidden ${isJourneyCollapsed ? 'max-h-0 opacity-0' : 'max-h-[2000px] opacity-100'}`}
+                        >
+                            <div className="p-6 pt-4 overflow-y-auto flex-1">
+                                <MedicationPath steps={journeySteps} onEditStep={handleEditStep} onAddStep={handleAddStep} onPaymentClick={handlePaymentClick} onDeleteStep={handleDeleteStep} paidStepIds={paidStepIds} patient={realPatient} readonly={readonly} />
+                            </div>
+                        </div>
                     </div>
                     <InjectionHistoryTable injections={injections} onDelete={(id, inj) => { setInjectionToDelete({ id, name: `${inj.dosage} - ${inj.date}` }); setIsConfirmDeleteModalOpen(true); }} onEdit={handleEditInjection} onAddHistorical={() => setIsHistoricalDoseModalOpen(true)} onTogglePayment={async (inj) => { if (inj.id) { await supabase.from('injections').update({ is_paid: !inj.isPaid }).eq('id', inj.id); fetchData(); } }} highlightedDate={highlightedDate} readonly={readonly} />
                 </div>
             </main>
 
-            {isAddWeightModalOpen && <AddWeightModal isOpen={isAddWeightModalOpen} onClose={() => setIsAddWeightModalOpen(false)} onSuccess={() => fetchData()} patientId={patient.id} currentWeight={realPatient.currentWeight} />}
+            {/* MODAIS GLOBAIS - AQUI ESTÁ A CORREÇÃO DE CONEXÃO DO SUCCESS */}
+            {isAddWeightModalOpen && (
+                <AddWeightModal
+                    isOpen={isAddWeightModalOpen}
+                    onClose={() => setIsAddWeightModalOpen(false)}
+                    onSuccess={handleWeightSuccess} // Conectado corretamente
+                    patientId={patient.id}
+                    currentWeight={realPatient.currentWeight}
+                />
+            )}
 
             {!readonly && (
                 <>
@@ -382,9 +531,33 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
                     {isEditDoseModalOpen && selectedInjectionForEdit && <GlobalRegisterDoseModal isOpen={isEditDoseModalOpen} onClose={() => { setIsEditDoseModalOpen(false); setSelectedInjectionForEdit(null); }} onSuccess={fetchData} editMode={true} editingInjection={selectedInjectionForEdit} />}
                     {isDosePaymentModalOpen && selectedInjectionForPayment && <DosePaymentModal isOpen={isDosePaymentModalOpen} onClose={() => { setIsDosePaymentModalOpen(false); setSelectedInjectionForPayment(null); }} onSuccess={fetchData} injection={selectedInjectionForPayment} patientName={realPatient.name} />}
                     {isEditPatientModalOpen && <AddPatientModal isOpen={isEditPatientModalOpen} onClose={() => setIsEditPatientModalOpen(false)} onSuccess={fetchData} patientToEdit={realPatient} />}
+
                     <ConfirmDeleteModal isOpen={isConfirmDeleteModalOpen} onClose={() => { setIsConfirmDeleteModalOpen(false); setInjectionToDelete(null); setStepToDelete(null); }} onConfirm={stepToDelete ? confirmDeleteStep : confirmDelete} itemName={stepToDelete ? `Dose ${stepToDelete.dosage}` : (injectionToDelete?.name || '')} loading={isDeleting} />
-                    {weightToDelete && <ConfirmDeleteModal isOpen={!!weightToDelete} onClose={() => setWeightToDelete(null)} onConfirm={async () => { if (!weightToDelete) return; try { await supabase.from('weight_measurements').delete().eq('id', weightToDelete.id); await supabase.from('patients').update({ current_weight: (realPatient.initialWeight || 0) }).eq('id', patient.id); fetchData(); setWeightToDelete(null); } catch (e) { } }} title="Excluir Peso" message="Tem certeza?" itemName={`${weightToDelete.weight}kg`} />}
                 </>
+            )}
+
+            {/* Modal de Exclusão de Peso MOVIDO PARA A RAIZ PARA GARANTIR QUE ABRA */}
+            {weightToDelete && (
+                <ConfirmDeleteModal
+                    isOpen={!!weightToDelete}
+                    onClose={() => setWeightToDelete(null)}
+                    title="Excluir Peso"
+                    message={`Tem certeza que deseja excluir o registro de ${weightToDelete.weight}kg de ${weightToDelete.date.toLocaleDateString('pt-BR')}?`}
+                    itemName={`${weightToDelete.weight}kg`}
+                    onConfirm={async () => {
+                        if (!weightToDelete) return;
+                        try {
+                            const { error } = await supabase.from('weight_measurements').delete().eq('id', weightToDelete.id);
+                            if (error) throw error;
+                            await supabase.from('patients').update({ current_weight: (realPatient.initialWeight || 0) }).eq('id', patient.id);
+                            fetchData();
+                            setWeightToDelete(null);
+                        } catch (e: any) {
+                            console.error(e);
+                            alert("Erro ao excluir: " + (e.message || "Verifique permissões."));
+                        }
+                    }}
+                />
             )}
         </div>
     );
