@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 
 interface ConfirmDeleteModalProps {
     isOpen: boolean;
     onClose: () => void;
     onConfirm: () => void;
     itemName: string;
-    loading?: boolean;
+    isLoading?: boolean;
 }
 
 const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
@@ -13,97 +13,72 @@ const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
     onClose,
     onConfirm,
     itemName,
-    loading = false
+    isLoading = false
 }) => {
+
+    // Debug lifecycle
+    useEffect(() => {
+        if (isOpen) console.log('ConfirmDeleteModal MOUNTED/OPENED for:', itemName);
+    }, [isOpen, itemName]);
+
     if (!isOpen) return null;
 
     return (
-        <div
-            style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 10000,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '1rem',
-                backgroundColor: 'rgba(15, 23, 42, 0.6)',
-                backdropFilter: 'blur(4px)'
-            }}
-            onClick={onClose}
-        >
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+            {/* Backdrop */}
             <div
-                style={{
-                    backgroundColor: 'white',
-                    borderRadius: '1rem',
-                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-                    width: '100%',
-                    maxWidth: '28rem',
-                    overflow: 'hidden'
-                }}
-                onClick={(e) => e.stopPropagation()}
-            >
-                {/* Header com ícone de aviso */}
-                <div className="px-6 py-5 bg-gradient-to-r from-red-50 to-rose-50 border-b border-red-100">
-                    <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center flex-shrink-0">
-                            <span className="material-symbols-outlined text-2xl">warning</span>
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-bold text-slate-900">Confirmar Exclusão</h2>
-                            <p className="text-sm text-slate-600">Esta ação não pode ser desfeita</p>
-                        </div>
+                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+                onClick={onClose}
+            ></div>
+
+            {/* Modal Content */}
+            <div className="relative bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+                {/* Header Warning */}
+                <div className="px-6 py-6 bg-red-50 dark:bg-red-900/10 border-b border-red-100 dark:border-red-900/20 flex flex-col items-center text-center gap-3">
+                    <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full flex items-center justify-center flex-shrink-0 animate-bounce">
+                        <span className="material-symbols-outlined text-3xl">warning</span>
+                    </div>
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900 dark:text-white">Confirmar Exclusão</h2>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Esta ação é irreversível</p>
                     </div>
                 </div>
 
-                {/* Corpo do modal */}
+                {/* Body */}
                 <div className="p-6">
-                    <div className="mb-6">
-                        <p className="text-slate-700 leading-relaxed mb-3">
+                    <div className="text-center mb-8">
+                        <p className="text-slate-600 dark:text-slate-300 mb-2">
                             Você está prestes a excluir permanentemente:
                         </p>
-                        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                            <p className="text-sm font-semibold text-red-900">{itemName}</p>
+                        <div className="inline-block px-4 py-2 bg-slate-100 dark:bg-slate-700/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <p className="text-lg font-bold text-slate-900 dark:text-white">{itemName}</p>
                         </div>
                     </div>
 
-                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg mb-6">
-                        <div className="flex items-start gap-2">
-                            <span className="material-symbols-outlined text-amber-600 text-lg flex-shrink-0 mt-0.5">info</span>
-                            <p className="text-sm text-amber-800">
-                                <strong>Atenção:</strong> Esta ação é permanente e não poderá ser revertida. Todos os dados relacionados serão removidos.
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Botões */}
                     <div className="flex gap-3">
                         <button
                             type="button"
                             onClick={onClose}
-                            disabled={loading}
-                            className="flex-1 px-4 py-3 border-2 border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
+                            disabled={isLoading}
+                            className="flex-1 px-4 py-3.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors disabled:opacity-50"
                         >
                             Cancelar
                         </button>
                         <button
                             type="button"
                             onClick={onConfirm}
-                            disabled={loading}
-                            className="flex-1 px-4 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                            disabled={isLoading}
+                            className="flex-1 px-4 py-3.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg shadow-red-900/20 transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2"
                         >
-                            {loading ? (
+                            {isLoading ? (
                                 <>
-                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                                    Excluindo...
+                                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                    <span>Excluindo...</span>
                                 </>
                             ) : (
                                 <>
-                                    <span className="material-symbols-outlined text-lg">delete_forever</span>
-                                    Excluir Permanentemente
+                                    <span className="material-symbols-outlined">delete_forever</span>
+                                    <span>Excluir</span>
                                 </>
                             )}
                         </button>

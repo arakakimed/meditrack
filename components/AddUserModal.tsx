@@ -1,18 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { UserRole, User } from '../types';
+import { createClient } from '@supabase/supabase-js';
 
-const AVATAR_OPTIONS = [
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Mark',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Jude',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Giselle',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Buster',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Trouble',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Tinkerbell',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Bandit'
-];
+// Credenciais para criação de usuário secundário (sem deslogar admin)
+const SUPABASE_URL = 'https://ermgwkdddilrisvycrne.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_YwXkmt-TmFr6nlIbpSFecg_BGyvUoQH';
 
 interface AddUserModalProps {
     isOpen: boolean;
@@ -31,7 +24,6 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [role, setRole] = useState<UserRole>('Staff');
-    const [selectedAvatar, setSelectedAvatar] = useState<string>(AVATAR_OPTIONS[0]);
 
     // New User Password
     const [password, setPassword] = useState('');
@@ -64,21 +56,18 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
             setIsChangingPassword(false);
 
             if (userToEdit) {
-                // EDIT MODE INIT
+                // EDIT MODE
                 setName(userToEdit.name);
                 setEmail(userToEdit.email);
                 setRole(userToEdit.role);
-                setSelectedAvatar(userToEdit.avatarUrl || AVATAR_OPTIONS[0]);
-                // Password fields reset
                 setCurrentPassword('');
                 setNewPassword('');
                 setConfirmNewPassword('');
             } else {
-                // NEW MODE INIT
+                // NEW MODE
                 setName('');
                 setEmail('');
                 setRole('Staff');
-                setSelectedAvatar(AVATAR_OPTIONS[0]);
                 setPassword('');
             }
         }
@@ -87,103 +76,127 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
     if (!isOpen) return null;
 
     const handleSubmit = async (e: React.FormEvent) => {
-        // ... [prevent default, set loading]
+        e.preventDefault();
+        setLoading(true);
+        setError(null);
+        setSuccessMsg(null);
 
         try {
             if (userToEdit) {
-                // EDIT MODE
-                // ... [DB Update]
+                // ========================== UPDATE ==========================
 
-                // Construct updated user object for immediate UI update
+                // 1. Atualizar Profile
+                const { error: updateError } = await supabase
+                    .from('profiles')
+                    .update({
+                        name,
+                        role: role.toLowerCase() // DATABASE: role lowercase (admin, staff)
+                    })
+                    .eq('id', userToEdit.id);
+
+                if (updateError) throw updateError;
+
+                // 2. Troca de Senha
+                if (isChangingPassword) {
+                    if (newPassword !== confirmNewPassword) throw new Error('As novas senhas não coincidem.');
+                    if (newPassword.length < 6) throw new Error('A senha deve ter no mínimo 6 caracteres.');
+
+                    const { error: passError } = await supabase.auth.updateUser({
+                        password: newPassword
+                    });
+                    if (passError) throw passError;
+                }
+
+                setSuccessMsg('Usuário atualizado com sucesso!');
+
                 const updatedUser = {
                     ...userToEdit,
                     name,
-                    email,
-                    role,
-                    avatarUrl: selectedAvatar,
-                    // If we had initials logic here, update it too
+                    role, // UI: role TitleCase
                     initials: name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
                 };
 
-                // ... [Password logic]
-
-                onSuccess(updatedUser);
-                if (!successMsg) onClose();
+                setTimeout(() => {
+                    onSuccess(updatedUser);
+                    setLoading(false);
+                    onClose();
+                }, 1000);
 
             } else {
-                // ADD NEW USER
-                // ... [Auth SignUp]
-                // ... [DB Insert]
+                // ========================== CREATE NEW ==========================
 
-                // Construct the new user object
-                const newUser = {
-                    name,
+                // 1. Criar Auth User
+                const tempSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                    auth: {
+                        persistSession: false,
+                        autoRefreshToken: false,
+                        detectSessionInUrl: false
+                    }
+                });
+
+                const { data: authData, error: authError } = await tempSupabase.auth.signUp({
                     email,
-                    role,
-                    avatarUrl: selectedAvatar,
-                    status: 'Active',
-                    initials: name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
-                };
+                    password,
+                    options: {
+                        data: {
+                            name: name,
+                            role: role.toLowerCase()
+                        }
+                    }
+                });
 
-                // NOTE: In a real app we'd get the ID from the DB insert response
-                // For now, if DB insert is successful, we assume it's created.
-                // ideally, we should fetch it or return it from the backend. 
-                // But since we are doing optimistic updates, let's minimally mock the structure 
-                // so the UI can update. Ideally, onSuccess should receive the REAL DB user.
+                if (authError) {
+                    if (authError.message?.includes('already registered')) {
+                        console.warn("Usuário já existe no Auth... erro fatal para este fluxo sem backend.");
+                        throw new Error('Este e-mail já está registrado em Auth. Tente outro.');
+                    }
+                    throw authError;
+                }
 
-                // If using optimistic UI, we might need a temp ID if the list relies on keys.
-                // However, let's assume the list re-fetches soon after anyway.
-                // But wait, the list implementation I wrote checks for ID existence. 
-                // We really should return an object that at least resembles a user.
+                if (authData.user) {
+                    const newUserId = authData.user.id;
 
-                onSuccess(newUser);
-                onClose();
+                    // 2. Criar Profile Manualmente
+                    const { error: profileError } = await supabase
+                        .from('profiles')
+                        .insert({
+                            id: newUserId,
+                            email: email,
+                            name: name,
+                            role: role.toLowerCase(), // CRÍTICO: db constraint check exige lowercase
+                            created_at: new Date().toISOString()
+                        });
+
+                    if (profileError) {
+                        console.error("Erro ao inserir profile manual:", profileError);
+                        throw new Error(`Auth criada, mas falha ao salvar perfil: ${profileError.message}`);
+                    }
+
+                    setSuccessMsg(`Usuário ${name} criado com sucesso!`);
+
+                    const newUser = {
+                        id: newUserId,
+                        name,
+                        email,
+                        role, // UI: TitleCase
+                        status: 'Active',
+                        initials: name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
+                    };
+
+                    setTimeout(() => {
+                        onSuccess(newUser);
+                        setLoading(false);
+                        onClose();
+                    }, 1000);
+                }
             }
 
         } catch (err: any) {
-            // ... [Error handling]
-            if (
-                err.message?.includes("relation") ||
-                err.message?.includes("not found") ||
-                err.message?.includes("schema cache")
-            ) {
-                fallbackSave();
-                return;
-            }
-            // ...
+            console.error('Erro ao salvar:', err);
+            setError(err.message || 'Erro ao processar solicitação.');
+            setLoading(false);
         }
     };
-
-    const fallbackSave = () => {
-        const stored = localStorage.getItem('meditrack_profiles');
-        let currentProfiles = stored ? JSON.parse(stored) : [];
-        let updatedUser = null;
-
-        if (userToEdit) {
-            updatedUser = { ...userToEdit, name, email, role, avatarUrl: selectedAvatar };
-            currentProfiles = currentProfiles.map((p: any) =>
-                p.id === userToEdit.id ? { ...p, name, email, role, avatarUrl: selectedAvatar } : p
-            );
-        } else {
-            // ... [New user object creation]
-            const newUser = {
-                id: crypto.randomUUID(),
-                name,
-                email,
-                role,
-                status: 'Active',
-                initials: name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase(),
-                avatarUrl: selectedAvatar
-            };
-            currentProfiles = [newUser, ...currentProfiles];
-            updatedUser = newUser; // Assign newUser to updatedUser so it's returned
-        }
-        localStorage.setItem('meditrack_profiles', JSON.stringify(currentProfiles));
-
-        onSuccess(updatedUser);
-        onClose();
-    }
-    // ... [Rest of component]
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -198,25 +211,7 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
 
                 <form onSubmit={handleSubmit} className="p-6 space-y-5">
 
-                    {/* AVATAR GRID - ALWAYS VISIBLE */}
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-3">Avatar</label>
-                        <div className="grid grid-cols-5 gap-3">
-                            {AVATAR_OPTIONS.map((avatar, index) => (
-                                <div
-                                    key={index}
-                                    onClick={() => setSelectedAvatar(avatar)}
-                                    className={`aspect-square rounded-full overflow-hidden cursor-pointer border-2 transition-all hover:scale-110 ${selectedAvatar === avatar
-                                        ? 'border-primary ring-2 ring-primary/20 scale-110'
-                                        : 'border-transparent hover:border-slate-200'
-                                        }`}
-                                >
-                                    <img src={avatar} alt={`Avatar ${index}`} className="w-full h-full object-cover bg-slate-100" />
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
+                    {/* NOME */}
                     <div>
                         <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Nome Completo</label>
                         <input
@@ -229,6 +224,7 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                         />
                     </div>
 
+                    {/* EMAIL */}
                     <div>
                         <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">E-mail (Login)</label>
                         <input
@@ -241,7 +237,7 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                         />
                     </div>
 
-                    {/* NEW USER PASSWORD */}
+                    {/* SENHA (NOVO) */}
                     {!userToEdit && (
                         <div>
                             <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Senha de Acesso</label>
@@ -257,7 +253,7 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                         </div>
                     )}
 
-                    {/* EDIT USER PASSWORD CHANGE */}
+                    {/* SENHA (EDITAR) */}
                     {userToEdit && isSelfEdit && (
                         <div className="pt-2">
                             {!isChangingPassword ? (
@@ -301,7 +297,7 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                         </div>
                     )}
 
-                    {/* ROLE SELECT */}
+                    {/* ROLE */}
                     <div>
                         <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
                             Perfil de Acesso
@@ -320,14 +316,13 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                         </select>
                     </div>
 
-                    {/* FEEDBACK MESSAGES */}
+                    {/* FEEDBACK */}
                     {error && (
                         <div className="p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-xl flex items-center gap-2 animate-in slide-in-from-bottom-2">
                             <span className="material-symbols-outlined text-lg">error</span>
                             {error}
                         </div>
                     )}
-
                     {successMsg && (
                         <div className="p-3 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-sm rounded-xl flex items-center gap-2 animate-in slide-in-from-bottom-2">
                             <span className="material-symbols-outlined text-lg">check_circle</span>

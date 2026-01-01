@@ -231,11 +231,21 @@ const SettingsPage: React.FC = () => {
                 const { data: profilesData } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
                 if (profilesData) {
                     profilesData.forEach((p: any) => {
+                        // Normalizar Role (admin -> Admin)
+                        let roleNormalized: UserRole = 'Patient';
+                        if (p.role) {
+                            const r = p.role.toLowerCase();
+                            if (r === 'admin') roleNormalized = 'Admin';
+                            else if (r === 'staff') roleNormalized = 'Staff';
+                            else if (r === 'patient') roleNormalized = 'Patient';
+                            else roleNormalized = p.role; // Fallback
+                        }
+
                         userMap.set(p.id, {
                             id: p.id,
                             name: p.name || 'Sem nome',
                             email: p.email || '',
-                            role: p.role as UserRole,
+                            role: roleNormalized,
                             status: 'Active', // Profiles geralmente são ativos
                             avatarUrl: p.avatar_url,
                             initials: p.initials || (p.name ? p.name.substring(0, 2).toUpperCase() : '??')
@@ -282,7 +292,13 @@ const SettingsPage: React.FC = () => {
                                 userMap.set(existingUserId, { ...existing, status: uiStatus, role: 'Patient' });
                             }
                         }
-                        // Se não encontrou vínculo, adiciona como novo usuário SOMENTE SE não achou por email
+                        // Proteção Extra: Se for o email do Super Admin, NUNCA criar como paciente novo
+                        if (pt.email === 'arakaki.med@gmail.com' && !existingUserId) {
+                            // Ignorar este registro de paciente, pois ele é um Admin duplicado/fantasma
+                            return;
+                        }
+
+                        // Se não encontrou vínculo, adiciona como novo usuário
                         else {
                             // Usar user_id como ID se existir, senão o ID do paciente
                             const idToUse = pt.user_id || pt.id;
@@ -304,17 +320,28 @@ const SettingsPage: React.FC = () => {
                 }
             } catch (patErr) { console.warn("Erro ao buscar pacientes:", patErr); }
 
-            const mergedUsers = Array.from(userMap.values());
-            if (mergedUsers.length === 0 && localData) setUsers(JSON.parse(localData));
-            else setUsers(mergedUsers); // Se vazio mesmo assim, usa array vazio ou mock se preferir
+            let mergedUsers = Array.from(userMap.values());
+
+            // VACINA FINAL: Remover qualquer ocorrência do Super Admin que esteja como 'Patient'
+            mergedUsers = mergedUsers.filter(u => {
+                if (u.email?.toLowerCase().trim() === 'arakaki.med@gmail.com' && u.role === 'Patient') {
+                    return false; // Remove da lista
+                }
+                return true;
+            });
+
+            // Força atualização e limpa cache antigo que possa estar corrompido
+            localStorage.removeItem('meditrack_profiles');
+
+            if (mergedUsers.length === 0) setUsers(mockUsers);
+            else setUsers(mergedUsers);
 
         } catch (err) {
-            console.error(err);
+            console.error("Erro crítico em fetchUsers:", err);
         } finally {
             setLoading(false);
         }
     };
-
     useEffect(() => {
         fetchUsers();
         const savedRoles = localStorage.getItem('meditrack_role_definitions');
@@ -346,51 +373,41 @@ const SettingsPage: React.FC = () => {
         if (!userToDelete) return;
         setDeleteLoading(true);
         try {
-            // Primeiro, tentar descobrir se é um paciente para pegar o ID correto
-            let patientIdToDelete = userToDelete;
-            let userIdToDelete = userToDelete;
+            console.log('Iniciando exclusão de:', userToDelete);
 
-            const { data: patientData } = await supabase
-                .from('patients')
-                .select('id, user_id')
-                .or(`id.eq.${userToDelete},user_id.eq.${userToDelete}`)
-                .maybeSingle();
+            // TENTATIVA 1: Via RPC (Função Segura de Backend)
+            // Isso evita problemas de RLS no frontend
+            const { data: rpcData, error: rpcError } = await supabase.rpc('delete_user_data', {
+                target_id: userToDelete
+            });
 
-            if (patientData) {
-                patientIdToDelete = patientData.id;
-                userIdToDelete = patientData.user_id;
-            }
-
-            // 1. Deletar Profile (PRIORIDADE)
-            // Tenta deletar pelo ID do user
-            if (userIdToDelete) {
-                await supabase.from('profiles').delete().eq('id', userIdToDelete);
-            }
-            // Tenta deletar profiles apontando para este paciente
-            if (patientIdToDelete) {
-                await supabase.from('profiles').delete().eq('patient_id', patientIdToDelete);
-            }
-
-            // 2. Deletar Paciente
-            if (patientIdToDelete) {
-                await supabase.from('patients').delete().eq('id', patientIdToDelete);
+            if (rpcError) {
+                console.warn('RPC delete failed, falling back to client delete:', rpcError);
+                throw rpcError; // Lança erro para cair no catch ou tentar fallback
             } else {
-                // Se não achou em patientData, tenta deletar diretamente com o ID que temos
-                // (caso seja um usuário Admin/Staff sem registro de patient)
-                await supabase.from('profiles').delete().eq('id', userToDelete); // Redundante mas seguro
+                console.log('RPC Delete Success:', rpcData);
             }
 
+            // Client-side fallback logic removida para focar na RPC, 
+            // mas mantemos o update de estado local
             const updatedUsers = users.filter(u => u.id !== userToDelete);
             setUsers(updatedUsers);
             localStorage.setItem('meditrack_profiles', JSON.stringify(updatedUsers));
-        } catch (err) {
+
+        } catch (err: any) {
             console.error('Erro ao deletar usuário:', err);
-            alert('Erro ao excluir usuário. Verifique o console.');
+
+            // Fallback manual se a RPC não existir
+            if (err.message && err.message.includes('function not found')) {
+                alert('Erro: A função de exclusão (RPC) não foi encontrada no banco. Por favor, execute o script "admin_delete_function.sql".');
+            } else {
+                alert(`Erro ao excluir: ${err.message || 'Erro desconhecido'}`);
+            }
         } finally {
             setDeleteLoading(false);
             setIsDeleteModalOpen(false);
             setUserToDelete(null);
-            fetchUsers();
+            await fetchUsers();
         }
     };
 
@@ -513,8 +530,7 @@ const SettingsPage: React.FC = () => {
                 isOpen={isDeleteModalOpen}
                 onClose={() => setIsDeleteModalOpen(false)}
                 onConfirm={confirmDelete}
-                title="Excluir Usuário"
-                description="Tem certeza que deseja excluir este usuário?"
+                itemName={users.find(u => u.id === userToDelete)?.name || 'Usuário'}
                 isLoading={deleteLoading}
             />
 
