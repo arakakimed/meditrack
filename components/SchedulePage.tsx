@@ -251,7 +251,7 @@ const AppointmentListItem: React.FC<{
 
 const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = ({ onViewPatient }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
-    const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+    const [selectedDate, setSelectedDate] = useState<Date | null>(new Date()); // Start with today selected
     const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [tagMap, setTagMap] = useState<TagMap>({});
     const [loading, setLoading] = useState(true);
@@ -563,6 +563,29 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
             if (!map[key]) map[key] = [];
             map[key].push(event);
         });
+
+        // Filter duplicates: remove 'forecast' if 'injection' exists for same patient on same day
+        Object.keys(map).forEach(key => {
+            const dayEvents = map[key];
+            // Get all patients who have an injection on this day
+            const patientsWithInjection = new Set(
+                dayEvents
+                    .filter(e => e.type === 'injection')
+                    .map(e => e.patientId)
+            );
+
+            // Filter out forecasts for patients who already have an injection
+            map[key] = dayEvents.filter(event => {
+                // Keep all injections
+                if (event.type === 'injection') return true;
+                // Keep forecasts only if patient doesn't have an injection on this day
+                if (event.type === 'forecast' && patientsWithInjection.has(event.patientId)) {
+                    return false; // Remove this forecast
+                }
+                return true;
+            });
+        });
+
         return map;
     }, [events]);
 

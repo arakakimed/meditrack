@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { Patient } from '../types';
 import { TAG_COLORS } from './TagManagerModal';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
+import FeedbackModal from './FeedbackModal';
 
 interface PatientsPageProps {
     onViewPatient: (patient: Patient) => void;
@@ -183,6 +184,17 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
     const [accessPatient, setAccessPatient] = useState<Patient | null>(null);
 
     const [emailInputModal, setEmailInputModal] = useState(false);
+
+    // Feedback Modal state
+    const [feedbackModal, setFeedbackModal] = useState<{
+        isOpen: boolean;
+        type: 'success' | 'error' | 'warning' | 'info';
+        title: string;
+        message: string;
+        details?: string;
+        actionLabel?: string;
+        actionPatient?: Patient;
+    }>({ isOpen: false, type: 'info', title: '', message: '' });
     const [emailPatient, setEmailPatient] = useState<Patient | null>(null);
     const [accessLoading, setAccessLoading] = useState(false);
 
@@ -198,7 +210,9 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
                     ...p,
                     id: p.id,
                     avatarUrl: p.avatar_url,
-                    tags: p.tags || []
+                    tags: p.tags || [],
+                    user_id: p.user_id,
+                    access_granted: p.access_granted || false
                 })));
             }
         } catch (error) {
@@ -228,7 +242,10 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
         if (!tagInfo) return null;
         const colorConfig = TAG_COLORS.find(c => c.name === tagInfo.color) || TAG_COLORS[4];
         return (
-            <span key={tagId} className={`text-[10px] font-black px-2 py-0.5 rounded border uppercase shadow-sm ${colorConfig.bg} ${colorConfig.text} ${colorConfig.border}`}>
+            <span
+                key={tagId}
+                className={`inline-flex items-center justify-center h-5 px-2.5 rounded text-[9px] font-black uppercase tracking-wide ${colorConfig.bg} ${colorConfig.text} ${colorConfig.border} border`}
+            >
                 {tagInfo.name}
             </span>
         );
@@ -285,7 +302,21 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
                 .update({ email })
                 .eq('id', emailPatient.id);
 
-            if (updateError) throw updateError;
+            if (updateError) {
+                // Tratamento específico de erros
+                if (updateError.code === '23505') {
+                    // Unique constraint violation
+                    alert('Este e-mail já está em uso por outro paciente. Por favor, use um e-mail diferente.');
+                    return;
+                } else if (updateError.code === 'PGRST204' || updateError.message?.includes('column')) {
+                    // Coluna não existe
+                    alert('Erro de configuração: A coluna "email" não existe na tabela. Execute a migração SQL no Supabase.');
+                    console.error('SQL necessário: ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS email TEXT;');
+                    return;
+                } else {
+                    throw updateError;
+                }
+            }
 
             // Atualiza localmente
             setPatients(prev => prev.map(p =>
@@ -297,9 +328,9 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
 
             setEmailInputModal(false);
             setEmailPatient(null);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Erro ao salvar e-mail:', error);
-            alert('Erro ao salvar e-mail.');
+            alert(`Erro ao salvar e-mail: ${error?.message || 'Erro desconhecido'}`);
         } finally {
             setAccessLoading(false);
         }
@@ -307,22 +338,83 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
 
     const grantAccess = async (patient: Patient, email: string) => {
         setAccessLoading(true);
+        const defaultPassword = 'Mudar@123';
+
         try {
-            // Chama a RPC do Supabase
-            const { error } = await supabase.rpc('handle_patient_access', {
-                p_patient_id: patient.id,
-                p_email: email,
-                p_password: 'Mudar@123'
+            // Usar Auth API oficial do Supabase
+            // IMPORTANTE: Desabilite "Confirm email" em Authentication > Providers > Email
+            const { data: authData, error: authError } = await supabase.auth.signUp({
+                email: email.toLowerCase().trim(),
+                password: defaultPassword,
+                options: {
+                    data: { patient_id: patient.id, name: patient.name, role: 'patient' }
+                }
             });
 
-            if (error) throw error;
+            if (authError) {
+                // Se usuário já existe, apenas atualizar vínculo
+                if (authError.message?.includes('already registered') || authError.message?.includes('already exists')) {
+                    await supabase.from('patients').update({ email: email.toLowerCase().trim() }).eq('id', patient.id);
+                    setAccessPatient({ ...patient, email });
+                    setAccessGrantedModal(true);
+                    return;
+                }
+                throw authError;
+            }
+
+            // Atualizar paciente com user_id
+            await supabase.from('patients').update({
+                email: email.toLowerCase().trim(),
+                user_id: authData?.user?.id,
+                access_granted: true,
+                access_granted_at: new Date().toISOString()
+            }).eq('id', patient.id);
+
+            // Atualiza lista local com status de acesso
+            setPatients(prev => prev.map(p =>
+                p.id === patient.id
+                    ? { ...p, email: email.toLowerCase().trim(), user_id: authData?.user?.id, access_granted: true }
+                    : p
+            ));
 
             // Mostra modal de sucesso
             setAccessPatient({ ...patient, email });
             setAccessGrantedModal(true);
-        } catch (error) {
+
+        } catch (error: any) {
             console.error('Erro ao liberar acesso:', error);
-            alert('Erro ao liberar acesso. Verifique se a função RPC existe no Supabase.');
+
+            if (error.message?.includes('rate limit') || error.message?.includes('429')) {
+                setFeedbackModal({
+                    isOpen: true,
+                    type: 'warning',
+                    title: 'Muitas Tentativas',
+                    message: 'Aguarde alguns minutos e tente novamente.',
+                    details: error.message,
+                    actionLabel: 'Tentar Novamente',
+                    actionPatient: patient
+                });
+            } else if (error.message?.includes('invalid')) {
+                setFeedbackModal({
+                    isOpen: true,
+                    type: 'error',
+                    title: 'E-mail Inválido',
+                    message: 'O e-mail informado não é válido. Por favor, corrija e tente novamente.',
+                    details: error.message,
+                    actionLabel: 'Corrigir E-mail',
+                    actionPatient: patient
+                });
+            } else {
+                setFeedbackModal({
+                    isOpen: true,
+                    type: 'error',
+                    title: 'Erro ao Liberar Acesso',
+                    message: 'Não foi possível liberar o acesso. Tente novamente.',
+                    details: error.message,
+                    actionLabel: 'Tentar Novamente',
+                    actionPatient: patient
+                });
+            }
         } finally {
             setAccessLoading(false);
         }
@@ -367,23 +459,43 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
                 </button>
             </div>
 
-            <div className="flex gap-2 overflow-x-auto pb-2 -mx-2 px-2 no-scrollbar">
+            {/* Barra de Filtros - Grid Responsivo */}
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                {/* Botão "Todas" */}
                 <button
                     onClick={() => setSelectedTagId('Todas')}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all whitespace-nowrap ${selectedTagId === 'Todas' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}
+                    className={`h-10 w-full rounded-xl text-xs font-bold border-2 transition-all duration-200 flex items-center justify-center active:scale-95 ${selectedTagId === 'Todas'
+                        ? 'bg-slate-800 text-white border-slate-800 shadow-lg shadow-slate-800/20'
+                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700'
+                        }`}
                 >
                     Todas
                 </button>
-                {allClinicTags.map(tag => (
-                    <button
-                        key={tag.id}
-                        onClick={() => setSelectedTagId(tag.id)}
-                        className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all whitespace-nowrap ${selectedTagId === tag.id ? 'ring-2 ring-blue-500 scale-105' : 'opacity-70'}`}
-                        style={{ backgroundColor: TAG_COLORS.find(c => c.name === tag.color)?.hex + '20', color: TAG_COLORS.find(c => c.name === tag.color)?.hex, borderColor: TAG_COLORS.find(c => c.name === tag.color)?.hex + '40' }}
-                    >
-                        {tag.name}
-                    </button>
-                ))}
+
+                {/* Tags dinâmicas */}
+                {allClinicTags.map(tag => {
+                    const tagColor = TAG_COLORS.find(c => c.name === tag.color);
+                    const isActive = selectedTagId === tag.id;
+
+                    return (
+                        <button
+                            key={tag.id}
+                            onClick={() => setSelectedTagId(tag.id)}
+                            className={`h-10 w-full rounded-xl text-xs font-bold border-2 transition-all duration-200 flex items-center justify-center active:scale-95 ${isActive
+                                ? 'shadow-lg'
+                                : 'hover:shadow-md'
+                                }`}
+                            style={{
+                                backgroundColor: isActive ? tagColor?.hex : (tagColor?.hex + '10'),
+                                color: isActive ? 'white' : tagColor?.hex,
+                                borderColor: isActive ? tagColor?.hex : (tagColor?.hex + '40'),
+                                boxShadow: isActive ? `0 4px 14px ${tagColor?.hex}30` : undefined
+                            }}
+                        >
+                            {tag.name}
+                        </button>
+                    );
+                })}
             </div>
 
             <div className="space-y-3">
@@ -434,14 +546,24 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
                                             </button>
 
                                             {/* Acesso */}
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); handleAccessClick(patient); }}
-                                                disabled={accessLoading}
-                                                className="h-12 bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-                                            >
-                                                <span className="material-symbols-outlined text-lg">lock_open</span>
-                                                Acesso
-                                            </button>
+                                            {(() => {
+                                                const isAccessGranted = !!(patient.email && patient.user_id);
+                                                return (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleAccessClick(patient); }}
+                                                        disabled={accessLoading}
+                                                        className={`h-12 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 ${isAccessGranted
+                                                                ? 'bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300'
+                                                                : 'bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300'
+                                                            }`}
+                                                    >
+                                                        <span className="material-symbols-outlined text-lg">
+                                                            {isAccessGranted ? 'verified_user' : 'lock_open'}
+                                                        </span>
+                                                        {isAccessGranted ? 'Liberado' : 'Acesso'}
+                                                    </button>
+                                                );
+                                            })()}
 
                                             {/* Excluir */}
                                             <button
@@ -484,6 +606,21 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
                 onClose={() => { setAccessGrantedModal(false); setAccessPatient(null); }}
                 patientName={accessPatient?.name || ''}
                 email={accessPatient?.email || ''}
+            />
+
+            {/* Modal de Feedback (Erros/Avisos) */}
+            <FeedbackModal
+                isOpen={feedbackModal.isOpen}
+                onClose={() => setFeedbackModal(prev => ({ ...prev, isOpen: false }))}
+                type={feedbackModal.type}
+                title={feedbackModal.title}
+                message={feedbackModal.message}
+                details={feedbackModal.details}
+                actionLabel={feedbackModal.actionLabel}
+                onAction={feedbackModal.actionPatient ? () => {
+                    setEmailPatient(feedbackModal.actionPatient!);
+                    setEmailInputModal(true);
+                } : undefined}
             />
         </div>
     );

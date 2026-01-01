@@ -27,27 +27,46 @@ const EnableAccessModal: React.FC<EnableAccessModalProps> = ({ isOpen, onClose, 
     const handleCreateUser = async () => {
         setLoading(true);
         try {
-            // CHAMADA PARA A EDGE FUNCTION QUE VOCÊ DEPLOYOU
-            const { data, error } = await supabase.functions.invoke('create-user', {
-                body: {
-                    email,
-                    password,
-                    patient_id: patient.id,
-                    name: patient.name
+            // Usar Auth API oficial do Supabase
+            // IMPORTANTE: Desabilite "Confirm email" em Authentication > Providers > Email
+            const { data: authData, error: authError } = await supabase.auth.signUp({
+                email: email.toLowerCase().trim(),
+                password,
+                options: {
+                    data: { patient_id: patient.id, name: patient.name, role: 'patient' }
                 }
             });
 
-            if (error) throw new Error(error.message || 'Erro na comunicação com o servidor');
+            if (authError) {
+                if (authError.message?.includes('already registered') || authError.message?.includes('already exists')) {
+                    await supabase.from('patients').update({ email: email.toLowerCase().trim() }).eq('id', patient.id);
+                    alert(`O e-mail já existe. O paciente pode fazer login com a senha existente.`);
+                    onSuccess();
+                    onClose();
+                    return;
+                }
+                throw authError;
+            }
 
-            // Se a função retornar erro de lógica (ex: email já existe)
-            if (data && data.error) throw new Error(data.error.message || 'Erro ao criar usuário');
+            // Atualizar paciente com user_id
+            await supabase.from('patients').update({
+                email: email.toLowerCase().trim(),
+                user_id: authData?.user?.id,
+                access_granted: true,
+                access_granted_at: new Date().toISOString()
+            }).eq('id', patient.id);
 
             alert(`Sucesso! O acesso de ${patient.name} foi criado.`);
             onSuccess();
             onClose();
         } catch (error: any) {
             console.error('Erro:', error);
-            alert('Erro ao liberar acesso: ' + (error.message || 'Verifique se o e-mail já está em uso.'));
+
+            if (error.message?.includes('rate limit') || error.message?.includes('429')) {
+                alert('Muitas tentativas. Aguarde alguns minutos e tente novamente.');
+            } else {
+                alert('Erro ao liberar acesso: ' + (error.message || 'Erro desconhecido'));
+            }
         } finally {
             setLoading(false);
         }

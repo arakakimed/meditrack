@@ -189,7 +189,20 @@ const App: React.FC = () => {
                     onAddPatient={handleAddPatient}
                     onManageTags={() => setIsTagModalOpen(true)}
                 />;
-            case 'schedule': return <SchedulePage />;
+            case 'schedule': return <SchedulePage onViewPatient={(patientId) => {
+                // Find the patient by ID and navigate to their profile
+                const findAndViewPatient = async () => {
+                    const { data: patient } = await supabase.from('patients').select('*').eq('id', patientId).single();
+                    if (patient) {
+                        setAdminViewingPatient({
+                            ...patient,
+                            avatarUrl: patient.avatar_url,
+                            initials: patient.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
+                        });
+                    }
+                };
+                findAndViewPatient();
+            }} />;
             case 'medications': return <MedicationsPage />;
             case 'financials': return <FinancialsPage />;
             case 'settings': return <SettingsPage />;
@@ -219,11 +232,16 @@ const App: React.FC = () => {
                 </div>
             </aside>
 
-            <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200 flex justify-around p-2 pb-safe z-50">
-                <MobileNavItem icon="dashboard" label="Painel" active={currentView === 'dashboard' && !adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }} />
-                <MobileNavItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
-                <MobileNavItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
-                <MobileNavItem icon="settings" label="Ajustes" active={currentView === 'settings'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} />
+            {/* Bottom Navigation - Mobile */}
+            <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200 z-50 safe-area-bottom">
+                <div className="grid grid-cols-6 gap-0.5 px-1 py-1.5">
+                    <MobileNavItem icon="dashboard" label="Painel" active={currentView === 'dashboard' && !adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }} />
+                    <MobileNavItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
+                    <MobileNavItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
+                    <MobileNavItem icon="payments" label="Finanças" active={currentView === 'financials'} onClick={() => { setAdminViewingPatient(null); setCurrentView('financials'); }} />
+                    <MobileNavItem icon="inventory_2" label="Estoque" active={currentView === 'medications'} onClick={() => { setAdminViewingPatient(null); setCurrentView('medications'); }} />
+                    <MobileNavItem icon="settings" label="Ajustes" active={currentView === 'settings'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} />
+                </div>
             </div>
 
             <main className="flex-1 flex flex-col h-full overflow-hidden relative">
@@ -257,7 +275,16 @@ const SidebarItem: React.FC<any> = ({ icon, label, active, onClick }) => (
     <button onClick={onClick} className={`flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all ${active ? 'bg-blue-50 text-blue-600 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}><span className={`material-symbols-outlined text-[22px] ${active ? 'fill-current' : ''}`}>{icon}</span><span className="text-sm">{label}</span></button>
 );
 const MobileNavItem: React.FC<any> = ({ icon, label, active, onClick }) => (
-    <button onClick={onClick} className={`flex flex-col items-center justify-center w-16 gap-1 ${active ? 'text-blue-600' : 'text-slate-400'}`}><span className={`material-symbols-outlined text-2xl ${active ? 'fill-current' : ''}`}>{icon}</span><span className="text-[10px] font-bold">{label}</span></button>
+    <button
+        onClick={onClick}
+        className={`flex flex-col items-center justify-center py-1.5 gap-0.5 rounded-lg transition-colors ${active
+            ? 'text-blue-600 bg-blue-50'
+            : 'text-slate-400 hover:text-slate-600'
+            }`}
+    >
+        <span className={`material-symbols-outlined text-xl ${active ? 'font-semibold' : ''}`}>{icon}</span>
+        <span className="text-[9px] font-semibold leading-tight truncate max-w-full px-0.5">{label}</span>
+    </button>
 );
 
 export default App;

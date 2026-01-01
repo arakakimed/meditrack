@@ -3,6 +3,8 @@ export interface Patient {
     id: string;
     name: string;
     email?: string;  // E-mail do paciente para acesso ao app
+    user_id?: string; // ID do usuário no auth.users (se tiver acesso)
+    access_granted?: boolean; // Indica se o acesso foi liberado
     avatarUrl?: string;
     initials: string;
     age: number;

@@ -293,11 +293,26 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
             const { data: stepsData } = await supabase.from('medication_steps').select('*').eq('patient_id', patient.id).order('order_index', { ascending: true });
             setMedicationSteps(stepsData || []);
             const { data: injectionsData } = await supabase.from('injections').select('*').eq('patient_id', patient.id).order('created_at', { ascending: false });
-            const formattedInjections = (injectionsData || []).map(inj => ({
-                id: inj.id, date: (typeof inj.applied_at === 'string' ? inj.applied_at.split('T')[0] : '') || '', dosage: inj.dosage, notes: inj.notes,
-                status: inj.status === 'Applied' ? 'Aplicada' : 'Pulada', doseValue: inj.dose_value || 0, applicationDate: (typeof inj.applied_at === 'string' ? inj.applied_at.split('T')[0] : ''),
-                isPaid: inj.is_paid || false, patient_id: inj.patient_id, patientWeightAtInjection: inj.patient_weight_at_injection, medicationId: inj.medication_id, isHistorical: inj.is_historical
-            } as Injection));
+            const formattedInjections = (injectionsData || []).map(inj => {
+                const dateStr = (typeof inj.applied_at === 'string' ? inj.applied_at.split('T')[0] : '') || '';
+                // Extract day number from date string (YYYY-MM-DD)
+                const dayNumber = dateStr ? dateStr.split('-')[2] : '';
+                return {
+                    id: inj.id,
+                    date: dateStr,
+                    day: dayNumber, // Added missing 'day' property
+                    dosage: inj.dosage,
+                    notes: inj.notes,
+                    status: inj.status === 'Applied' ? 'Aplicada' : 'Pulada',
+                    doseValue: inj.dose_value || 0,
+                    applicationDate: dateStr,
+                    isPaid: inj.is_paid || false,
+                    patient_id: inj.patient_id,
+                    patientWeightAtInjection: inj.patient_weight_at_injection,
+                    medicationId: inj.medication_id,
+                    isHistorical: inj.is_historical
+                } as Injection;
+            });
             setInjections(formattedInjections);
             const { data: weightData } = await supabase.from('weight_measurements').select('*').eq('patient_id', patient.id).order('date', { ascending: true });
             setManualWeights(weightData || []);
