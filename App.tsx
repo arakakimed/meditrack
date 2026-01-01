@@ -170,6 +170,7 @@ const App: React.FC = () => {
                     onBack={() => setAdminViewingPatient(null)}
                     onGoHome={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }}
                     readonly={false}
+                    isAdmin={true}
                 />
             );
         }

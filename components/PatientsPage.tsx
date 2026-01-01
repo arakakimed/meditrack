@@ -1,9 +1,32 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { Patient } from '../types';
 import { TAG_COLORS } from './TagManagerModal';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 import FeedbackModal from './FeedbackModal';
+
+// Utility function to convert HEX color to RGBA with transparency
+const hexToRgba = (hex: string, alpha: number): string => {
+    // Remove # if present
+    const cleanHex = hex.replace('#', '');
+
+    // Parse hex values
+    const r = parseInt(cleanHex.substring(0, 2), 16);
+    const g = parseInt(cleanHex.substring(2, 4), 16);
+    const b = parseInt(cleanHex.substring(4, 6), 16);
+
+    // Return rgba string
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+// Default color for patients without tags
+const DEFAULT_TAG_COLOR = {
+    name: 'Slate',
+    hex: '#64748b',
+    bg: 'bg-slate-100',
+    text: 'text-slate-700',
+    border: 'border-slate-200'
+};
 
 interface PatientsPageProps {
     onViewPatient: (patient: Patient) => void;
@@ -198,6 +221,9 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
     const [emailPatient, setEmailPatient] = useState<Patient | null>(null);
     const [accessLoading, setAccessLoading] = useState(false);
 
+    // Refs for scroll into view when card is expanded
+    const cardRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+
     const fetchData = async () => {
         setLoading(true);
         try {
@@ -251,9 +277,61 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
         );
     };
 
-    const handleCardClick = (patientId: string) => {
+    // Get primary color for patient based on their first tag (fully dynamic)
+    const getPatientPrimaryColor = useCallback((patient: Patient) => {
+        // Check if patient has tags
+        if (!patient.tags || patient.tags.length === 0) {
+            return DEFAULT_TAG_COLOR;
+        }
+
+        // Get the first tag ID
+        const primaryTagId = patient.tags[0];
+
+        // Find the tag info from loaded clinic tags
+        const tagInfo = allClinicTags.find(t => t.id === primaryTagId);
+        if (!tagInfo) {
+            return DEFAULT_TAG_COLOR;
+        }
+
+        // Find the color configuration based on tag's color name
+        const colorConfig = TAG_COLORS.find(c => c.name === tagInfo.color);
+        if (!colorConfig) {
+            return DEFAULT_TAG_COLOR;
+        }
+
+        return colorConfig;
+    }, [allClinicTags]);
+
+    const handleCardClick = useCallback((patientId: string) => {
+        const isCurrentlyExpanded = expandedPatientId === patientId;
+
+        // Toggle expansion
         setExpandedPatientId(prev => prev === patientId ? null : patientId);
-    };
+
+        // If expanding (not collapsing), scroll into view after animation
+        if (!isCurrentlyExpanded) {
+            // Wait for the expansion animation to complete (300ms matches the transition duration)
+            setTimeout(() => {
+                const cardElement = cardRefs.current[patientId];
+                if (cardElement) {
+                    // Calculate if the card is near the bottom of the viewport
+                    const rect = cardElement.getBoundingClientRect();
+                    const viewportHeight = window.innerHeight;
+                    const bottomNavHeight = 80; // Approximate height of bottom navigation
+
+                    // Check if card bottom is below visible area (accounting for bottom nav)
+                    const isCardCutOff = rect.bottom > (viewportHeight - bottomNavHeight);
+
+                    if (isCardCutOff || rect.top < 0) {
+                        cardElement.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'center'
+                        });
+                    }
+                }
+            }, 350); // Slightly longer than animation duration for safety
+        }
+    }, [expandedPatientId]);
 
     // Handle Delete
     const handleDeleteClick = (patient: Patient) => {
@@ -501,24 +579,58 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
             <div className="space-y-3">
                 {filteredPatients.map(patient => {
                     const isExpanded = expandedPatientId === patient.id;
+                    const primaryColor = getPatientPrimaryColor(patient);
+
                     return (
                         <div
                             key={patient.id}
-                            className={`bg-white rounded-2xl border transition-all cursor-pointer overflow-hidden ${isExpanded ? 'shadow-lg border-blue-200 ring-1 ring-blue-100' : 'border-slate-100 hover:shadow-md'}`}
+                            ref={(el) => { cardRefs.current[patient.id] = el; }}
+                            className={`relative rounded-2xl transition-all duration-300 cursor-pointer overflow-hidden ${isExpanded
+                                ? 'shadow-xl ring-2 relative z-10 scale-[1.01]'
+                                : 'hover:shadow-lg'
+                                }`}
+                            style={{
+                                backgroundColor: hexToRgba(primaryColor.hex, 0.04),
+                                borderWidth: '1px',
+                                borderColor: isExpanded ? primaryColor.hex : hexToRgba(primaryColor.hex, 0.2),
+                                boxShadow: isExpanded ? `0 0 0 2px ${hexToRgba(primaryColor.hex, 0.15)}` : undefined
+                            }}
                         >
-                            <div className="p-4 flex items-center justify-between" onClick={() => handleCardClick(patient.id)}>
+                            {/* Dynamic colored left accent bar */}
+                            <div
+                                className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl"
+                                style={{ backgroundColor: primaryColor.hex }}
+                            />
+
+                            <div className="p-4 pl-5 flex items-center justify-between" onClick={() => handleCardClick(patient.id)}>
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-blue-600 font-bold border border-slate-50 overflow-hidden text-lg">
-                                        {patient.avatarUrl ? <img src={patient.avatarUrl} className="w-full h-full object-cover" alt="" /> : patient.initials}
+                                    {/* Avatar with dynamic color */}
+                                    <div
+                                        className="w-12 h-12 rounded-full flex items-center justify-center font-bold overflow-hidden text-lg shadow-sm"
+                                        style={{
+                                            backgroundColor: patient.avatarUrl ? 'transparent' : hexToRgba(primaryColor.hex, 0.15),
+                                            color: primaryColor.hex,
+                                            border: `2px solid ${hexToRgba(primaryColor.hex, 0.3)}`
+                                        }}
+                                    >
+                                        {patient.avatarUrl
+                                            ? <img src={patient.avatarUrl} className="w-full h-full object-cover" alt="" />
+                                            : patient.initials
+                                        }
                                     </div>
                                     <div>
                                         <h4 className="font-bold text-slate-900">{patient.name}</h4>
-                                        <div className="flex gap-1 mt-1">
+                                        <div className="flex flex-wrap gap-1 mt-1">
                                             {patient.tags?.map(tId => renderTagBadge(tId))}
                                         </div>
                                     </div>
                                 </div>
-                                <span className={`material-symbols-outlined text-slate-300 transition-transform duration-300 ${isExpanded ? 'rotate-90 text-blue-500' : ''}`}>chevron_right</span>
+                                <span
+                                    className={`material-symbols-outlined transition-transform duration-300 ${isExpanded ? 'rotate-90' : ''}`}
+                                    style={{ color: isExpanded ? primaryColor.hex : hexToRgba(primaryColor.hex, 0.5) }}
+                                >
+                                    chevron_right
+                                </span>
                             </div>
 
                             <div className={`grid transition-all duration-300 ease-out ${isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
@@ -553,8 +665,8 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
                                                         onClick={(e) => { e.stopPropagation(); handleAccessClick(patient); }}
                                                         disabled={accessLoading}
                                                         className={`h-12 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 ${isAccessGranted
-                                                                ? 'bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300'
-                                                                : 'bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300'
+                                                            ? 'bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300'
+                                                            : 'bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300'
                                                             }`}
                                                     >
                                                         <span className="material-symbols-outlined text-lg">

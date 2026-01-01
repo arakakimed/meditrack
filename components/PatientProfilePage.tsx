@@ -251,7 +251,7 @@ const InjectionHistoryTable: React.FC<{
 };
 
 // --- COMPONENTE PRINCIPAL ---
-const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoHome: () => void, readonly?: boolean }> = ({ patient, onBack, onGoHome, readonly = false }) => {
+const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoHome: () => void, readonly?: boolean, isAdmin?: boolean }> = ({ patient, onBack, onGoHome, readonly = false, isAdmin = false }) => {
     const [realPatient, setRealPatient] = useState<Patient>(patient);
     const [medicationSteps, setMedicationSteps] = useState<MedicationStep[]>([]);
     const [injections, setInjections] = useState<Injection[]>([]);
@@ -285,10 +285,25 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
             const { data: patientData } = await supabase.from('patients').select('*').eq('id', patient.id).single();
             if (patientData) {
                 setRealPatient({
-                    id: patientData.id, name: patientData.name, initials: patientData.initials, age: patientData.age, gender: patientData.gender,
-                    avatarUrl: patientData.avatar_url, currentWeight: patientData.current_weight, initialWeight: patientData.initial_weight,
-                    weightChange: patientData.weight_change, bmi: patientData.bmi, bmiCategory: patientData.bmi_category, targetWeight: patientData.target_weight, height: patientData.height
-                });
+                    id: patientData.id,
+                    name: patientData.name,
+                    initials: patientData.initials,
+                    age: patientData.age,
+                    gender: patientData.gender,
+                    avatarUrl: patientData.avatar_url,
+                    currentWeight: patientData.current_weight,
+                    initialWeight: patientData.initial_weight,
+                    weightChange: patientData.weight_change,
+                    bmi: patientData.bmi,
+                    bmiCategory: patientData.bmi_category,
+                    targetWeight: patientData.target_weight,
+                    height: patientData.height,
+                    // Additional fields for edit modal
+                    dateOfBirth: patientData.date_of_birth,
+                    tags: patientData.tags,
+                    comorbidities: patientData.comorbidities,
+                    clinicalNotes: patientData.clinical_notes
+                } as any);
             }
             const { data: stepsData } = await supabase.from('medication_steps').select('*').eq('patient_id', patient.id).order('order_index', { ascending: true });
             setMedicationSteps(stepsData || []);
@@ -380,21 +395,55 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
             <main className="max-w-7xl mx-auto px-4 py-8 space-y-8">
                 {/* Banner */}
                 <section className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-900 rounded-xl shadow-sm border border-blue-100 dark:border-slate-700 p-4 md:p-6 mb-4 md:mb-6">
-                    <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
-                        <div className="flex items-center gap-4">
-                            <div className="relative w-16 h-16 md:w-20 md:h-20 flex-shrink-0">
-                                <div className="w-full h-full rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-2xl font-bold shadow-lg">{realPatient.name.charAt(0)}</div>
-                            </div>
-                            <div className="min-w-0">
-                                <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white truncate">{realPatient.name}</h2>
-                                <div className="flex flex-wrap items-center gap-2 md:gap-3 text-xs md:text-sm text-slate-600 dark:text-slate-300 mt-1">
-                                    <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">cake</span> {realPatient.age} anos</span>
-                                    <span>•</span>
-                                    <span className="flex items-center gap-1"><span className="material-symbols-outlined text-base">{realPatient.gender === 'Female' ? 'female' : 'male'}</span> {realPatient.gender === 'Female' ? 'Feminino' : 'Masculino'}</span>
-                                </div>
+                    {/* Top row: Avatar + Name + Actions */}
+                    <div className="flex items-start gap-3 md:gap-4">
+                        {/* Avatar */}
+                        <div className="relative w-14 h-14 md:w-20 md:h-20 flex-shrink-0">
+                            <div className="w-full h-full rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-xl md:text-2xl font-bold shadow-lg">
+                                {realPatient.name.charAt(0)}
                             </div>
                         </div>
-                        {isSuperResponder && <div className="self-start md:self-center ml-auto"><div className="bg-gradient-to-r from-amber-300 to-orange-400 text-amber-900 border border-amber-200 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-sm flex items-center gap-1 animate-in fade-in zoom-in duration-500"><span className="material-symbols-outlined text-sm font-bold">bolt</span><span>Super Responder</span></div></div>}
+
+                        {/* Name + Info */}
+                        <div className="flex-1 min-w-0">
+                            <h2 className="text-lg md:text-2xl font-bold text-slate-900 dark:text-white truncate pr-2">
+                                {realPatient.name}
+                            </h2>
+                            <div className="flex flex-wrap items-center gap-2 md:gap-3 text-xs md:text-sm text-slate-600 dark:text-slate-300 mt-1">
+                                <span className="flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-base">cake</span>
+                                    {realPatient.age} anos
+                                </span>
+                                <span className="hidden sm:inline">•</span>
+                                <span className="flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-base">
+                                        {realPatient.gender === 'Female' ? 'female' : 'male'}
+                                    </span>
+                                    {realPatient.gender === 'Female' ? 'Feminino' : 'Masculino'}
+                                </span>
+                            </div>
+
+                            {/* Badges - Below name on mobile, inline on desktop */}
+                            <div className="flex flex-wrap items-center gap-2 mt-3 md:mt-2">
+                                {isSuperResponder && (
+                                    <div className="bg-gradient-to-r from-amber-300 to-orange-400 text-amber-900 border border-amber-200 px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-wider shadow-md flex items-center gap-1.5 animate-in fade-in zoom-in duration-500">
+                                        <span className="material-symbols-outlined text-sm font-bold">bolt</span>
+                                        <span>Super Responder</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Edit Button - Always visible on the right */}
+                        {isAdmin && !readonly && (
+                            <button
+                                onClick={() => setIsEditPatientModalOpen(true)}
+                                className="flex-shrink-0 p-2 md:p-2.5 rounded-full bg-white/80 dark:bg-slate-700/80 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 dark:hover:bg-blue-900/30 transition-all shadow-sm"
+                                title="Editar paciente"
+                            >
+                                <span className="material-symbols-outlined text-lg md:text-xl">edit</span>
+                            </button>
+                        )}
                     </div>
                 </section>
 
@@ -562,7 +611,25 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
                     {isPaymentModalOpen && selectedStepForPayment && <PaymentModal isOpen={isPaymentModalOpen} onClose={() => { setIsPaymentModalOpen(false); setSelectedStepForPayment(null); }} onSuccess={fetchData} step={selectedStepForPayment} patientId={patient.id} patientName={realPatient.name} />}
                     {isEditDoseModalOpen && selectedInjectionForEdit && <GlobalRegisterDoseModal isOpen={isEditDoseModalOpen} onClose={() => { setIsEditDoseModalOpen(false); setSelectedInjectionForEdit(null); }} onSuccess={fetchData} editMode={true} editingInjection={selectedInjectionForEdit} />}
                     {isDosePaymentModalOpen && selectedInjectionForPayment && <DosePaymentModal isOpen={isDosePaymentModalOpen} onClose={() => { setIsDosePaymentModalOpen(false); setSelectedInjectionForPayment(null); }} onSuccess={fetchData} injection={selectedInjectionForPayment} patientName={realPatient.name} />}
-                    {isEditPatientModalOpen && <AddPatientModal isOpen={isEditPatientModalOpen} onClose={() => setIsEditPatientModalOpen(false)} onSuccess={fetchData} patientToEdit={realPatient} />}
+                    {isEditPatientModalOpen && <AddPatientModal
+                        isOpen={isEditPatientModalOpen}
+                        onClose={() => setIsEditPatientModalOpen(false)}
+                        onSuccess={fetchData}
+                        patientToEdit={{
+                            id: realPatient.id,
+                            name: realPatient.name,
+                            age: realPatient.age,
+                            gender: realPatient.gender,
+                            date_of_birth: (realPatient as any).dateOfBirth || (realPatient as any).date_of_birth,
+                            current_weight: realPatient.currentWeight,
+                            initial_weight: realPatient.initialWeight,
+                            target_weight: realPatient.targetWeight,
+                            height: realPatient.height,
+                            tags: (realPatient as any).tags,
+                            comorbidities: (realPatient as any).comorbidities,
+                            clinical_notes: (realPatient as any).clinicalNotes || (realPatient as any).clinical_notes
+                        }}
+                    />}
 
                     <ConfirmDeleteModal isOpen={isConfirmDeleteModalOpen} onClose={() => { setIsConfirmDeleteModalOpen(false); setInjectionToDelete(null); setStepToDelete(null); }} onConfirm={stepToDelete ? confirmDeleteStep : confirmDelete} itemName={stepToDelete ? `Dose ${stepToDelete.dosage}` : (injectionToDelete?.name || '')} loading={isDeleting} />
                 </>

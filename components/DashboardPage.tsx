@@ -5,6 +5,18 @@ import AddPatientModal from './AddPatientModal';
 import GlobalRegisterDoseModal from './GlobalRegisterDoseModal';
 import { TAG_COLORS } from './TagManagerModal';
 
+// Utility function to convert HEX color to RGBA with transparency
+const hexToRgba = (hex: string, alpha: number): string => {
+    const cleanHex = hex.replace('#', '');
+    const r = parseInt(cleanHex.substring(0, 2), 16);
+    const g = parseInt(cleanHex.substring(2, 4), 16);
+    const b = parseInt(cleanHex.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+// Default color for items without tags
+const DEFAULT_TAG_COLOR = TAG_COLORS.find(c => c.name === 'Slate') || TAG_COLORS[11];
+
 interface DashboardPageProps {
     onViewPatient: (patient: Patient) => void;
     onAdministerDose: (patient: Patient) => void;
@@ -143,18 +155,41 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
                         todaysDoses.map((item) => {
                             const p = item.patients;
                             const firstTagId = p?.tags?.[0];
-                            const tagStyle = firstTagId ? getTagInfo(firstTagId) : TAG_COLORS[11];
+                            const tagStyle = firstTagId ? getTagInfo(firstTagId) : DEFAULT_TAG_COLOR;
                             const tagData = allClinicTags.find(t => t.id === firstTagId);
+                            const primaryHex = tagStyle?.hex || DEFAULT_TAG_COLOR.hex;
 
                             return (
                                 <div
                                     key={item.id}
-                                    className={`p-4 flex items-center justify-between border-l-4 bg-white rounded-r-2xl shadow-sm hover:shadow-md transition-all cursor-pointer ${tagStyle?.border.replace('border-', 'border-l-')}`}
+                                    className="relative p-4 pl-5 flex items-center justify-between rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer overflow-hidden"
+                                    style={{
+                                        backgroundColor: hexToRgba(primaryHex, 0.04),
+                                        borderWidth: '1px',
+                                        borderColor: hexToRgba(primaryHex, 0.2)
+                                    }}
                                     onClick={() => p && onViewPatient(p as any)}
                                 >
+                                    {/* Dynamic colored left accent bar */}
+                                    <div
+                                        className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl"
+                                        style={{ backgroundColor: primaryHex }}
+                                    />
+
                                     <div className="flex items-center gap-4 min-w-0 flex-1">
-                                        <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-blue-600 font-bold overflow-hidden border border-slate-200 flex-shrink-0">
-                                            {p?.avatar_url ? <img src={p.avatar_url} className="w-full h-full object-cover" /> : (p?.initials || '?')}
+                                        {/* Avatar with dynamic color */}
+                                        <div
+                                            className="w-12 h-12 rounded-full flex items-center justify-center font-bold overflow-hidden flex-shrink-0 shadow-sm"
+                                            style={{
+                                                backgroundColor: p?.avatar_url ? 'transparent' : hexToRgba(primaryHex, 0.15),
+                                                color: primaryHex,
+                                                border: `2px solid ${hexToRgba(primaryHex, 0.3)}`
+                                            }}
+                                        >
+                                            {p?.avatar_url
+                                                ? <img src={p.avatar_url} className="w-full h-full object-cover" alt="" />
+                                                : (p?.initials || '?')
+                                            }
                                         </div>
                                         <div className="min-w-0 flex-1">
                                             <h4 className="font-bold text-slate-900 text-sm truncate">{p?.name || 'Paciente'}</h4>
@@ -162,7 +197,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
                                             {/* TAG, DATA E MG NA MESMA LINHA */}
                                             <div className="flex flex-wrap items-center gap-2 mt-1">
                                                 {tagData && (
-                                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border uppercase shadow-sm ${tagStyle?.bg} ${tagStyle?.text} ${tagStyle?.border}`}>
+                                                    <span
+                                                        className="text-[9px] font-black px-1.5 py-0.5 rounded uppercase shadow-sm"
+                                                        style={{
+                                                            backgroundColor: hexToRgba(primaryHex, 0.15),
+                                                            color: primaryHex,
+                                                            border: `1px solid ${hexToRgba(primaryHex, 0.3)}`
+                                                        }}
+                                                    >
                                                         {tagData.name}
                                                     </span>
                                                 )}
@@ -172,7 +214,12 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
                                             </div>
                                         </div>
                                     </div>
-                                    <span className={`material-symbols-outlined ${tagStyle?.text} opacity-20`}>chevron_right</span>
+                                    <span
+                                        className="material-symbols-outlined"
+                                        style={{ color: hexToRgba(primaryHex, 0.4) }}
+                                    >
+                                        chevron_right
+                                    </span>
                                 </div>
                             );
                         })
