@@ -191,12 +191,17 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
     onManageTags
 }) => {
     const [patients, setPatients] = useState<Patient[]>([]);
+    const [pendingPatients, setPendingPatients] = useState<Patient[]>([]);
     const [allClinicTags, setAllClinicTags] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedTagId, setSelectedTagId] = useState<string>('Todas');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
     const [expandedPatientId, setExpandedPatientId] = useState<string | null>(null);
+
+    // Pending patients approval
+    const [showPendingSection, setShowPendingSection] = useState(true);
+    const [approvalLoading, setApprovalLoading] = useState<string | null>(null);
 
     // Modals state
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -224,21 +229,36 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
     // Refs for scroll into view when card is expanded
     const cardRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
+
     const fetchData = async () => {
         setLoading(true);
         try {
             const { data: tagsData } = await supabase.from('clinic_tags').select('*');
             if (tagsData) setAllClinicTags(tagsData);
 
+            // Buscar TODOS os pacientes (aprovados e pendentes)
             const { data: pData } = await supabase.from('patients').select('*').order('name');
             if (pData) {
-                setPatients(pData.map(p => ({
+                // Separar aprovados e pendentes
+                const approved = pData.filter(p => p.access_granted === true || p.status === 'approved');
+                const pending = pData.filter(p => p.access_granted === false && p.status === 'pending');
+
+                setPatients(approved.map(p => ({
                     ...p,
                     id: p.id,
                     avatarUrl: p.avatar_url,
                     tags: p.tags || [],
                     user_id: p.user_id,
                     access_granted: p.access_granted || false
+                })));
+
+                setPendingPatients(pending.map(p => ({
+                    ...p,
+                    id: p.id,
+                    avatarUrl: p.avatar_url,
+                    tags: p.tags || [],
+                    user_id: p.user_id,
+                    access_granted: false
                 })));
             }
         } catch (error) {
@@ -249,6 +269,83 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
     };
 
     useEffect(() => { fetchData(); }, []);
+
+    // ========== FUNÇÕES DE APROVAÇÃO/REJEIÇÃO ==========
+
+    const approvePatient = async (patient: Patient) => {
+        setApprovalLoading(patient.id);
+        try {
+            const { error } = await supabase
+                .from('patients')
+                .update({
+                    access_granted: true,
+                    status: 'approved',
+                    approved_at: new Date().toISOString()
+                })
+                .eq('id', patient.id);
+
+            if (error) throw error;
+
+            // Atualizar listas locais
+            setPendingPatients(prev => prev.filter(p => p.id !== patient.id));
+            setPatients(prev => [...prev, { ...patient, access_granted: true }]);
+
+            setFeedbackModal({
+                isOpen: true,
+                type: 'success',
+                title: 'Paciente Aprovado!',
+                message: `${patient.name} agora pode acessar o sistema.`
+            });
+        } catch (error: any) {
+            console.error('Erro ao aprovar:', error);
+            setFeedbackModal({
+                isOpen: true,
+                type: 'error',
+                title: 'Erro ao Aprovar',
+                message: error.message || 'Não foi possível aprovar o paciente.'
+            });
+        } finally {
+            setApprovalLoading(null);
+        }
+    };
+
+    const rejectPatient = async (patient: Patient) => {
+        if (!confirm(`Tem certeza que deseja REJEITAR o cadastro de ${patient.name}? Esta ação é irreversível.`)) {
+            return;
+        }
+
+        setApprovalLoading(patient.id);
+        try {
+            // Deletar registro do paciente
+            const { error } = await supabase
+                .from('patients')
+                .delete()
+                .eq('id', patient.id);
+
+            if (error) throw error;
+
+            // Atualizar lista local
+            setPendingPatients(prev => prev.filter(p => p.id !== patient.id));
+
+            setFeedbackModal({
+                isOpen: true,
+                type: 'warning',
+                title: 'Cadastro Rejeitado',
+                message: `O cadastro de ${patient.name} foi rejeitado e removido.`
+            });
+        } catch (error: any) {
+            console.error('Erro ao rejeitar:', error);
+            setFeedbackModal({
+                isOpen: true,
+                type: 'error',
+                title: 'Erro ao Rejeitar',
+                message: error.message || 'Não foi possível rejeitar o cadastro.'
+            });
+        } finally {
+            setApprovalLoading(null);
+        }
+    };
+
 
     const filteredPatients = useMemo(() => {
         let result = patients.filter(p => {
@@ -342,15 +439,69 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
     const confirmDelete = async () => {
         if (!patientToDelete) return;
         setDeleteLoading(true);
+
         try {
-            const { error } = await supabase.from('patients').delete().eq('id', patientToDelete.id);
-            if (error) throw error;
+            // Verificar IDs atualizados antes de deletar
+            const { data: currentPatient } = await supabase
+                .from('patients')
+                .select('id, user_id')
+                .eq('id', patientToDelete.id)
+                .single();
+            const targetPatientId = currentPatient?.id || patientToDelete.id;
+            const targetUserId = currentPatient?.user_id || patientToDelete.user_id;
+
+            // 1. Tentar deletar da tabela PROFILES primeiro (para liberar a FK)
+
+            // A) Deletar qualquer profile vinculado explicitamente pelo patient_id (CRUCIAL)
+            const { error: profileFkError } = await supabase
+                .from('profiles')
+                .delete()
+                .eq('patient_id', targetPatientId);
+
+            if (profileFkError) console.warn('Erro ao deletar profiles por FK:', profileFkError);
+
+            // B) Deletar profile vinculado pelo ID do usuário (se existir)
+            if (targetUserId) {
+                const { error: profileIdError } = await supabase
+                    .from('profiles')
+                    .delete()
+                    .eq('id', targetUserId);
+                if (profileIdError) console.warn('Erro ao deletar profiles por ID:', profileIdError);
+            }
+
+            // 2. Agora sim, deletar da tabela patients
+            const { error: patientError } = await supabase
+                .from('patients')
+                .delete()
+                .eq('id', targetPatientId);
+
+            if (patientError) throw patientError;
+
+            // 3. Atualizar listas locais
             setPatients(prev => prev.filter(p => p.id !== patientToDelete.id));
+            setPendingPatients(prev => prev.filter(p => p.id !== patientToDelete.id));
+
+            // 4. Feedback
+            setFeedbackModal({
+                isOpen: true,
+                type: 'success',
+                title: 'Paciente Excluído',
+                message: `${patientToDelete.name} foi removido do sistema.`,
+                details: targetUserId
+                    ? '⚠️ Nota: O login do usuário ainda existe no Auth. Para remover completamente, acesse o Supabase Dashboard → Authentication → Users.'
+                    : undefined
+            });
+
             setDeleteModalOpen(false);
             setPatientToDelete(null);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Erro ao excluir paciente:', error);
-            alert('Erro ao excluir paciente.');
+            setFeedbackModal({
+                isOpen: true,
+                type: 'error',
+                title: 'Erro ao Excluir',
+                message: error.message || 'Não foi possível excluir o paciente.'
+            });
         } finally {
             setDeleteLoading(false);
         }
@@ -502,7 +653,15 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
         <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6 pb-24">
             <div className="flex justify-between items-end">
                 <div>
-                    <h2 className="text-2xl font-bold text-slate-900">Pacientes</h2>
+                    <div className="flex items-center gap-3">
+                        <h2 className="text-2xl font-bold text-slate-900">Pacientes</h2>
+                        {pendingPatients.length > 0 && (
+                            <span className="bg-amber-500 text-white text-xs font-black px-2.5 py-1 rounded-full animate-pulse flex items-center gap-1">
+                                <span className="material-symbols-outlined text-sm">notifications</span>
+                                {pendingPatients.length} novo{pendingPatients.length > 1 ? 's' : ''}
+                            </span>
+                        )}
+                    </div>
                     <p className="text-slate-500 text-sm">{patients.length} cadastrados</p>
                 </div>
                 <button onClick={onAddPatient} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg transition-all">
@@ -575,6 +734,101 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
                     );
                 })}
             </div>
+
+            {/* ========== SEÇÃO DE SOLICITAÇÕES PENDENTES ========== */}
+            {pendingPatients.length > 0 && showPendingSection && (
+                <div className="mb-6">
+                    <div
+                        className="flex items-center justify-between p-4 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 rounded-t-2xl cursor-pointer"
+                        onClick={() => setShowPendingSection(!showPendingSection)}
+                    >
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
+                                <span className="material-symbols-outlined text-white">person_add</span>
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-amber-900 dark:text-amber-300">Novas Solicitações</h3>
+                                <p className="text-xs text-amber-700 dark:text-amber-400">
+                                    {pendingPatients.length} paciente{pendingPatients.length > 1 ? 's' : ''} aguardando aprovação
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="bg-amber-500 text-white text-sm font-black px-3 py-1 rounded-full animate-pulse">
+                                {pendingPatients.length}
+                            </span>
+                            <span className={`material-symbols-outlined text-amber-600 transition-transform ${showPendingSection ? 'rotate-180' : ''}`}>
+                                expand_more
+                            </span>
+                        </div>
+                    </div>
+
+                    {showPendingSection && (
+                        <div className="space-y-2 p-4 bg-white dark:bg-slate-800 border-x border-b border-amber-200 dark:border-amber-800 rounded-b-2xl">
+                            {pendingPatients.map(patient => (
+                                <div
+                                    key={patient.id}
+                                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-amber-50/50 dark:bg-amber-900/10 rounded-xl border border-amber-100 dark:border-amber-800/50"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-12 h-12 rounded-full bg-amber-200 dark:bg-amber-800 flex items-center justify-center text-amber-700 dark:text-amber-300 font-bold text-lg">
+                                            {patient.initials || patient.name?.charAt(0) || '?'}
+                                        </div>
+                                        <div>
+                                            <h4 className="font-bold text-slate-900 dark:text-white">{patient.name}</h4>
+                                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                                                {patient.email && (
+                                                    <span className="flex items-center gap-1">
+                                                        <span className="material-symbols-outlined text-sm">mail</span>
+                                                        {patient.email}
+                                                    </span>
+                                                )}
+                                                {(patient as any).phone && (
+                                                    <span className="flex items-center gap-1">
+                                                        <span className="material-symbols-outlined text-sm">phone</span>
+                                                        {(patient as any).phone}
+                                                    </span>
+                                                )}
+                                                {(patient as any).requested_at && (
+                                                    <span className="flex items-center gap-1 text-amber-600">
+                                                        <span className="material-symbols-outlined text-sm">schedule</span>
+                                                        {new Date((patient as any).requested_at).toLocaleDateString('pt-BR')}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 sm:flex-shrink-0">
+                                        <button
+                                            onClick={() => approvePatient(patient)}
+                                            disabled={approvalLoading === patient.id}
+                                            className="flex-1 sm:flex-none px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                                        >
+                                            {approvalLoading === patient.id ? (
+                                                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                            ) : (
+                                                <>
+                                                    <span className="material-symbols-outlined text-lg">check_circle</span>
+                                                    <span className="hidden sm:inline">Aprovar</span>
+                                                </>
+                                            )}
+                                        </button>
+                                        <button
+                                            onClick={() => rejectPatient(patient)}
+                                            disabled={approvalLoading === patient.id}
+                                            className="flex-1 sm:flex-none px-4 py-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 font-bold text-sm rounded-xl transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                                        >
+                                            <span className="material-symbols-outlined text-lg">close</span>
+                                            <span className="hidden sm:inline">Rejeitar</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
 
             <div className="space-y-3">
                 {filteredPatients.map(patient => {

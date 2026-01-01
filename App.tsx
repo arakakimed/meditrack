@@ -54,17 +54,43 @@ const App: React.FC = () => {
     const checkUserRole = async (userId: string) => {
         setLoading(true);
         try {
-            const { data: profile, error } = await supabase.from('profiles').select('role, patient_id').eq('id', userId).single();
+            // Primeiro, verificar se é um paciente (cadastro direto pelo app)
+            const { data: patientByUserId } = await supabase
+                .from('patients')
+                .select('*')
+                .eq('user_id', userId)
+                .single();
+
+            if (patientByUserId) {
+                // É um paciente registrado diretamente
+                setUserRole('patient');
+                setPatientData(mapDatabasePatient(patientByUserId));
+                setLoading(false);
+                return;
+            }
+
+            // Se não encontrou em patients, verificar profiles (fluxo admin/staff)
+            const { data: profile, error } = await supabase
+                .from('profiles')
+                .select('role, patient_id')
+                .eq('id', userId)
+                .single();
+
             if (error || !profile) {
                 setUserRole('unauthorized');
             } else {
                 setUserRole(profile.role as any);
                 if (profile.role === 'patient' && profile.patient_id) {
-                    const { data: patient } = await supabase.from('patients').select('*').eq('id', profile.patient_id).single();
+                    const { data: patient } = await supabase
+                        .from('patients')
+                        .select('*')
+                        .eq('id', profile.patient_id)
+                        .single();
                     if (patient) setPatientData(mapDatabasePatient(patient));
                 }
             }
         } catch (err) {
+            console.error('Erro ao verificar role:', err);
             setUserRole('unauthorized');
         } finally {
             setLoading(false);

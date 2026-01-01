@@ -220,13 +220,13 @@ const SettingsPage: React.FC = () => {
     const fetchUsers = async () => {
         setLoading(true);
         try {
-            // 1. LocalStorage
+            // 1. LocalStorage (Backup/Cache)
             const localData = localStorage.getItem('meditrack_profiles');
-            let localUsers: User[] = localData ? JSON.parse(localData) : [];
-            const userMap = new Map<string, User>();
-            localUsers.forEach(u => userMap.set(u.id, u));
 
-            // 2. Supabase Profiles
+            // Map para unificar usuários
+            const userMap = new Map<string, User>();
+
+            // 2. Buscar Profiles do Supabase
             try {
                 const { data: profilesData } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
                 if (profilesData) {
@@ -236,50 +236,80 @@ const SettingsPage: React.FC = () => {
                             name: p.name || 'Sem nome',
                             email: p.email || '',
                             role: p.role as UserRole,
-                            status: 'Active',
+                            status: 'Active', // Profiles geralmente são ativos
                             avatarUrl: p.avatar_url,
                             initials: p.initials || (p.name ? p.name.substring(0, 2).toUpperCase() : '??')
                         });
                     });
                 }
-            } catch (dbErr) { console.warn("Supabase profiles silent fail:", dbErr); }
+            } catch (dbErr) { console.warn("Erro ao buscar profiles:", dbErr); }
 
-            // 3. Manual Patients (Pending)
+            // 3. Buscar Pacientes da tabela 'patients'
             try {
                 const { data: patientsData } = await supabase.from('patients').select('*').order('created_at', { ascending: false });
                 if (patientsData) {
                     patientsData.forEach((pt: any) => {
-                        let isLinked = false;
+                        // Verifica status do banco e mapeia para interface
+                        let uiStatus: UserStatus = 'Inactive';
+                        if (pt.access_granted || pt.status === 'approved') uiStatus = 'Active';
+                        else if (pt.status === 'pending') uiStatus = 'Pending';
+                        else if (pt.status === 'rejected') uiStatus = 'Inactive';
+
+                        // Tentar encontrar usuário existente (Profile) para mesclar
+                        let existingUserId: string | null = null;
+
+                        // 1. Tenta pelo user_id direto (vínculo forte)
                         if (pt.user_id && userMap.has(pt.user_id)) {
-                            isLinked = true;
+                            existingUserId = pt.user_id;
+                        }
+                        // 2. Tenta pelo e-mail (vínculo fraco/recuperação)
+                        else if (pt.email) {
+                            for (const [uid, u] of userMap.entries()) {
+                                if (u.email && u.email.toLowerCase() === pt.email.toLowerCase()) {
+                                    existingUserId = uid;
+                                    break;
+                                }
+                            }
                         }
 
-                        if (!isLinked) {
-                            if (!userMap.has(pt.id)) {
-                                userMap.set(pt.id, {
-                                    id: pt.id,
+                        // Se encontrou vínculo com Profile existente
+                        if (existingUserId) {
+                            const existing = userMap.get(existingUserId)!;
+
+                            // CORREÇÃO: Bloqueia alteração se for Admin ou Staff
+                            // Se for Admin/Staff, IGNORA os dados da tabela patients para fins de role/status
+                            if (existing.role !== 'Admin' && existing.role !== 'Staff') {
+                                userMap.set(existingUserId, { ...existing, status: uiStatus, role: 'Patient' });
+                            }
+                        }
+                        // Se não encontrou vínculo, adiciona como novo usuário SOMENTE SE não achou por email
+                        else {
+                            // Usar user_id como ID se existir, senão o ID do paciente
+                            const idToUse = pt.user_id || pt.id;
+
+                            if (!userMap.has(idToUse)) {
+                                userMap.set(idToUse, {
+                                    id: idToUse,
                                     name: pt.name,
                                     email: pt.email || '',
                                     role: 'Patient',
-                                    status: 'Pending',
+                                    status: uiStatus,
                                     avatarUrl: pt.avatar_url,
-                                    initials: pt.name.substring(0, 2).toUpperCase(),
+                                    initials: pt.name ? pt.name.substring(0, 2).toUpperCase() : '??',
                                     isManualPatient: true
                                 });
                             }
                         }
                     });
                 }
-            } catch (patErr) { console.warn("Supabase patients silent fail:", patErr); }
+            } catch (patErr) { console.warn("Erro ao buscar pacientes:", patErr); }
 
             const mergedUsers = Array.from(userMap.values());
-            if (mergedUsers.length === 0) setUsers(mockUsers);
-            else setUsers(mergedUsers);
+            if (mergedUsers.length === 0 && localData) setUsers(JSON.parse(localData));
+            else setUsers(mergedUsers); // Se vazio mesmo assim, usa array vazio ou mock se preferir
 
         } catch (err) {
             console.error(err);
-            const localData = localStorage.getItem('meditrack_profiles');
-            setUsers(localData ? JSON.parse(localData) : mockUsers);
         } finally {
             setLoading(false);
         }
@@ -294,7 +324,7 @@ const SettingsPage: React.FC = () => {
     // Ação ao clicar no Check Verde
     const handleApprove = (id: string, user: User) => {
         setSelectedPatientForAccess({
-            id: user.id,
+            id: user.id, // Isso pode ser o user_id ou patient_id dependendo do mapeamento
             name: user.name,
             email: user.email
         });
@@ -302,6 +332,7 @@ const SettingsPage: React.FC = () => {
     };
 
     const handleReject = async (id: string) => {
+        // Implementar lógica de rejeição se necessário
         const updatedUsers = users.filter(u => u.id !== id);
         setUsers(updatedUsers);
     };
@@ -315,11 +346,47 @@ const SettingsPage: React.FC = () => {
         if (!userToDelete) return;
         setDeleteLoading(true);
         try {
+            // Primeiro, tentar descobrir se é um paciente para pegar o ID correto
+            let patientIdToDelete = userToDelete;
+            let userIdToDelete = userToDelete;
+
+            const { data: patientData } = await supabase
+                .from('patients')
+                .select('id, user_id')
+                .or(`id.eq.${userToDelete},user_id.eq.${userToDelete}`)
+                .maybeSingle();
+
+            if (patientData) {
+                patientIdToDelete = patientData.id;
+                userIdToDelete = patientData.user_id;
+            }
+
+            // 1. Deletar Profile (PRIORIDADE)
+            // Tenta deletar pelo ID do user
+            if (userIdToDelete) {
+                await supabase.from('profiles').delete().eq('id', userIdToDelete);
+            }
+            // Tenta deletar profiles apontando para este paciente
+            if (patientIdToDelete) {
+                await supabase.from('profiles').delete().eq('patient_id', patientIdToDelete);
+            }
+
+            // 2. Deletar Paciente
+            if (patientIdToDelete) {
+                await supabase.from('patients').delete().eq('id', patientIdToDelete);
+            } else {
+                // Se não achou em patientData, tenta deletar diretamente com o ID que temos
+                // (caso seja um usuário Admin/Staff sem registro de patient)
+                await supabase.from('profiles').delete().eq('id', userToDelete); // Redundante mas seguro
+            }
+
             const updatedUsers = users.filter(u => u.id !== userToDelete);
             setUsers(updatedUsers);
             localStorage.setItem('meditrack_profiles', JSON.stringify(updatedUsers));
-        } catch (err) { console.error(err); }
-        finally {
+        } catch (err) {
+            console.error('Erro ao deletar usuário:', err);
+            alert('Erro ao excluir usuário. Verifique o console.');
+        } finally {
             setDeleteLoading(false);
             setIsDeleteModalOpen(false);
             setUserToDelete(null);
