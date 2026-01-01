@@ -11,6 +11,15 @@ import ConfirmDeleteModal from './ConfirmDeleteModal';
 import AddWeightModal from './AddWeightModal';
 import { PatientFinancials } from './PatientFinancials';
 
+// TIMEZONE-SAFE: Parse date string manually to avoid UTC conversion issues
+const parseSafeDate = (dateStr: string): Date => {
+    if (!dateStr) return new Date();
+    const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+    const [year, month, day] = cleanDate.split('-').map(Number);
+    if (!year || !month || !day) return new Date(dateStr);
+    return new Date(year, month - 1, day);
+};
+
 // --- JORNADA DO PACIENTE ---
 const MedicationPath: React.FC<{
     steps: MedicationStep[],
@@ -140,16 +149,24 @@ const InjectionHistoryTable: React.FC<{
     const [expandedRow, setExpandedRow] = useState<number | null>(null);
     const [isCollapsed, setIsCollapsed] = useState(true);
     const formatCurrency = (value: number) => value ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '-';
-
+    // TIMEZONE-SAFE: Parse date string manually to avoid UTC conversion issues
     const formatAestheticDate = (dateStr: string) => {
         try {
             if (!dateStr) return '';
-            const d = new Date(dateStr);
-            if (isNaN(d.getTime())) return dateStr;
-            const day = d.getDate();
-            const month = d.toLocaleString('pt-BR', { month: 'short' }).replace('.', '');
-            const year = d.getFullYear();
-            return `${day} ${month.charAt(0).toUpperCase() + month.slice(1)} ${year}`;
+
+            // Se vier DateTime ISO (2025-12-31T...), pega só a parte da data
+            const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+
+            // Divide manualmente para evitar conversão de timezone do navegador
+            const [year, month, day] = cleanDate.split('-').map(Number);
+
+            if (!year || !month || !day) return dateStr;
+
+            // Cria a data localmente (Mês no JS começa em 0)
+            const d = new Date(year, month - 1, day);
+
+            const monthName = d.toLocaleString('pt-BR', { month: 'short' }).replace('.', '');
+            return `${day} ${monthName.charAt(0).toUpperCase() + monthName.slice(1)} ${year}`;
         } catch { return dateStr; }
     };
 
@@ -295,8 +312,8 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
 
     const weightHistory: WeightDataPoint[] = useMemo(() => {
         const rawPoints: WeightDataPoint[] = [];
-        injections.forEach(inj => { if (inj.patientWeightAtInjection) rawPoints.push({ date: new Date(inj.applicationDate), weight: inj.patientWeightAtInjection, source: 'injection', label: inj.date }); });
-        manualWeights.forEach(mw => { rawPoints.push({ id: mw.id, date: new Date(mw.date), weight: mw.weight, source: 'manual', label: mw.date }); });
+        injections.forEach(inj => { if (inj.patientWeightAtInjection) rawPoints.push({ date: parseSafeDate(inj.applicationDate), weight: inj.patientWeightAtInjection, source: 'injection', label: inj.date }); });
+        manualWeights.forEach(mw => { rawPoints.push({ id: mw.id, date: parseSafeDate(mw.date), weight: mw.weight, source: 'manual', label: mw.date }); });
         return rawPoints.sort((a, b) => a.date.getTime() - b.date.getTime());
     }, [injections, manualWeights]);
 

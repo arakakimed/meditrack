@@ -14,6 +14,20 @@ const parseCurrency = (value: any): number => {
     return 0;
 };
 
+// TIMEZONE-SAFE: Parse date string manually to avoid UTC conversion issues
+const parseSafeDate = (dateStr: string) => {
+    if (!dateStr) return new Date();
+    const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+    const [year, month, day] = cleanDate.split('-').map(Number);
+    if (!year || !month || !day) return new Date(dateStr);
+    return new Date(year, month - 1, day);
+};
+
+const formatSafeDate = (dateStr: string, options?: Intl.DateTimeFormatOptions) => {
+    const d = parseSafeDate(dateStr);
+    return d.toLocaleDateString('pt-BR', options || {});
+};
+
 // --- Sub Component: Medication Profitability ---
 const MedicationProfitability: React.FC = () => {
     const [medications, setMedications] = useState<any[]>([]);
@@ -673,7 +687,7 @@ const FinancialsPage: React.FC = () => {
                                                                         <span className="text-sm font-medium text-slate-900 dark:text-white">{record.patients?.name}</span>
                                                                     </div>
                                                                 </td>
-                                                                <td className="px-6 py-4 text-sm text-slate-500 font-mono">{new Date(record.due_date).getDate()}</td>
+                                                                <td className="px-6 py-4 text-sm text-slate-500 font-mono">{parseSafeDate(record.due_date).getDate()}</td>
                                                                 <td className="px-6 py-4 text-sm text-slate-500 max-w-[200px] truncate" title={record.description}>{record.description}</td>
                                                                 <td className="px-6 py-4 text-sm text-slate-500">
                                                                     {record.injections?.medications?.name ? <span className="px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-xs font-medium">{record.injections.medications.name}</span> : '-'}
@@ -695,7 +709,7 @@ const FinancialsPage: React.FC = () => {
                                                                 {record.patients?.avatar_url ? <div className="bg-center bg-cover rounded-full size-8" style={{ backgroundImage: `url("${record.patients.avatar_url}")` }}></div> : <div className="size-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">{record.patients?.initials || '?'}</div>}
                                                                 <div>
                                                                     <h3 className="font-bold text-slate-900 dark:text-white text-sm line-clamp-1">{record.patients?.name}</h3>
-                                                                    <p className="text-[10px] text-slate-500">{new Date(record.due_date).toLocaleDateString('pt-BR')}</p>
+                                                                    <p className="text-[10px] text-slate-500">{formatSafeDate(record.due_date)}</p>
                                                                 </div>
                                                             </div>
                                                             <div onClick={(e) => e.stopPropagation()}>

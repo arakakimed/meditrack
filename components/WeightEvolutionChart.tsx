@@ -176,22 +176,15 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
         return { x1: getX(new Date(minDate)), y1: getY(startY), x2: getX(new Date(maxDate)), y2: getY(endY) };
     }, [dataPoints, minDate, maxDate, getX, getY]);
 
-    if (dataPoints.length < 2) {
-        return (
-            <div className="w-full h-64 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 flex items-center justify-center text-slate-400">
-                <div className="text-center">
-                    <span className="material-symbols-outlined text-4xl mb-2 opacity-50">show_chart</span>
-                    <p className="text-sm">Dados insuficientes para gerar o gráfico</p>
-                </div>
-            </div>
-        );
-    }
-
     const fontSizeAxis = isMobile ? 10 : 10;
     const circleRadius = isMobile ? 4 : 5;
 
+    // Flag para verificar se temos dados suficientes para o gráfico
+    const hasEnoughData = dataPoints.length >= 2;
+
     return (
         <div ref={chartRef} className="w-full bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 p-4 md:p-6 overflow-hidden relative">
+            {/* Header - SEMPRE renderizado com botões de ação */}
             <div className="flex justify-between items-center mb-4 md:mb-6">
                 <div>
                     <h3 className="text-base md:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -202,119 +195,130 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
                 {action && <div className="z-10">{action}</div>}
             </div>
 
-            <div className={`w-full transition-all duration-300 ${isMobile ? 'aspect-[4/3]' : 'aspect-[21/9]'} min-h-[250px] relative`}>
-                <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible relative z-20 pointer-events-none" preserveAspectRatio="none">
-                    <defs>
-                        <linearGradient id="lineGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.2" />
-                            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
-                        </linearGradient>
-                        <clipPath id="chartClip">
-                            <rect x={padding.left} y={0} width={width - padding.left - padding.right} height={height} />
-                        </clipPath>
-                        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-                            <feDropShadow dx="0" dy="2" stdDeviation="2" floodOpacity="0.3" />
-                        </filter>
-                    </defs>
+            {/* Body - Condicional: gráfico ou mensagem de dados insuficientes */}
+            {!hasEnoughData ? (
+                <div className="w-full h-48 md:h-64 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400">
+                    <div className="text-center">
+                        <span className="material-symbols-outlined text-4xl mb-2 opacity-50">show_chart</span>
+                        <p className="text-sm">Dados insuficientes para gerar o gráfico</p>
+                        <p className="text-xs text-slate-400 mt-1">Registre pelo menos 2 medições de peso</p>
+                    </div>
+                </div>
+            ) : (
+                <div className={`w-full transition-all duration-300 ${isMobile ? 'aspect-[4/3]' : 'aspect-[21/9]'} min-h-[250px] relative`}>
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible relative z-20 pointer-events-none" preserveAspectRatio="none">
+                        <defs>
+                            <linearGradient id="lineGradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.2" />
+                                <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+                            </linearGradient>
+                            <clipPath id="chartClip">
+                                <rect x={padding.left} y={0} width={width - padding.left - padding.right} height={height} />
+                            </clipPath>
+                            <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                                <feDropShadow dx="0" dy="2" stdDeviation="2" floodOpacity="0.3" />
+                            </filter>
+                        </defs>
 
-                    {targetZonePath && <path d={targetZonePath} fill="#94a3b8" className="opacity-20 dark:opacity-30" clipPath="url(#chartClip)" />}
-                    {superZonePath && <path d={superZonePath} fill="#10b981" fillOpacity={0.3} className="transition-all duration-500" clipPath="url(#chartClip)" />}
+                        {targetZonePath && <path d={targetZonePath} fill="#94a3b8" className="opacity-20 dark:opacity-30" clipPath="url(#chartClip)" />}
+                        {superZonePath && <path d={superZonePath} fill="#10b981" fillOpacity={0.3} className="transition-all duration-500" clipPath="url(#chartClip)" />}
 
-                    {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
-                        const w = minWeight + tick * weightRange;
-                        const y = getY(w);
-                        return (
-                            <g key={tick}>
-                                <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="currentColor" className="text-slate-100 dark:text-slate-700" strokeWidth="1" />
-                                <text x={padding.left - 6} y={y + 3} textAnchor="end" style={{ fontSize: fontSizeAxis }} className="fill-slate-400 font-medium">{w.toFixed(0)}</text>
+                        {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
+                            const w = minWeight + tick * weightRange;
+                            const y = getY(w);
+                            return (
+                                <g key={tick}>
+                                    <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="currentColor" className="text-slate-100 dark:text-slate-700" strokeWidth="1" />
+                                    <text x={padding.left - 6} y={y + 3} textAnchor="end" style={{ fontSize: fontSizeAxis }} className="fill-slate-400 font-medium">{w.toFixed(0)}</text>
+                                </g>
+                            );
+                        })}
+
+                        {trendPoints && <line x1={trendPoints.x1} y1={trendPoints.y1} x2={trendPoints.x2} y2={trendPoints.y2} stroke="#fb923c" strokeWidth="1.5" strokeDasharray="4 2" className="opacity-60" clipPath="url(#chartClip)" />}
+
+                        <path d={areaPath} fill="url(#lineGradient)" clipPath="url(#chartClip)" />
+                        <path d={linePath} fill="none" stroke="#3b82f6" strokeWidth={isMobile ? 2.5 : 3} strokeLinecap="round" strokeLinejoin="round" clipPath="url(#chartClip)" />
+
+                        {(() => {
+                            const start = dataPoints[0].date;
+                            const end = dataPoints[dataPoints.length - 1].date;
+                            const isSameYear = start.getFullYear() === end.getFullYear();
+                            const isSameMonth = isSameYear && start.getMonth() === end.getMonth();
+                            const formatOpts: Intl.DateTimeFormatOptions = isSameMonth ? { day: '2-digit', month: 'short' } : { month: 'short', year: '2-digit' };
+                            return (
+                                <>
+                                    <text x={getX(start)} y={height - 5} textAnchor="start" style={{ fontSize: fontSizeAxis }} className="fill-slate-400 font-medium">{start.toLocaleDateString('pt-BR', formatOpts)}</text>
+                                    <text x={getX(end)} y={height - 5} textAnchor="end" style={{ fontSize: fontSizeAxis }} className="fill-slate-400 font-medium">{end.toLocaleDateString('pt-BR', formatOpts)}</text>
+                                </>
+                            );
+                        })()}
+
+                        {dataPoints.map((point, i) => (
+                            <g
+                                key={i}
+                                onClick={(e) => { e.stopPropagation(); setSelectedIndex(selectedIndex === i ? null : i); }}
+                                style={{ cursor: 'pointer', pointerEvents: 'auto' }}
+                            >
+                                <circle cx={getX(point.date)} cy={getY(point.weight)} r={20} fill="transparent" />
+                                <circle
+                                    cx={getX(point.date)}
+                                    cy={getY(point.weight)}
+                                    r={selectedIndex === i ? circleRadius + 2 : circleRadius}
+                                    className={`fill-white stroke-blue-500 stroke-[2] transition-all ${selectedIndex === i ? 'stroke-blue-600' : ''}`}
+                                />
                             </g>
-                        );
-                    })}
+                        ))}
 
-                    {trendPoints && <line x1={trendPoints.x1} y1={trendPoints.y1} x2={trendPoints.x2} y2={trendPoints.y2} stroke="#fb923c" strokeWidth="1.5" strokeDasharray="4 2" className="opacity-60" clipPath="url(#chartClip)" />}
+                        {/* TOOLTIP BLINDADO */}
+                        {selectedIndex !== null && dataPoints[selectedIndex] && (() => {
+                            const point = dataPoints[selectedIndex];
+                            const x = getX(point.date);
+                            const y = getY(point.weight);
+                            const tipWidth = 110;
+                            const tipHeight = 55;
+                            const tipX = x - (tipWidth / 2);
+                            const tipY = y - tipHeight - 12;
+                            const safeX = Math.max(padding.left, Math.min(tipX, width - padding.right - tipWidth));
 
-                    <path d={areaPath} fill="url(#lineGradient)" clipPath="url(#chartClip)" />
-                    <path d={linePath} fill="none" stroke="#3b82f6" strokeWidth={isMobile ? 2.5 : 3} strokeLinecap="round" strokeLinejoin="round" clipPath="url(#chartClip)" />
+                            return (
+                                <g className="animate-in fade-in zoom-in-95 duration-200" filter="url(#shadow)" style={{ pointerEvents: 'auto' }}>
+                                    <rect x={safeX} y={tipY} width={tipWidth} height={tipHeight} rx="8" fill="#1e293b" />
+                                    <path d={`M ${x - 6} ${tipY + tipHeight} L ${x} ${tipY + tipHeight + 6} L ${x + 6} ${tipY + tipHeight} Z`} fill="#1e293b" />
+                                    <text x={safeX + (tipWidth / 2)} y={tipY + 22} textAnchor="middle" fill="white" fontWeight="bold" fontSize="14">{point.weight} kg</text>
+                                    <text x={safeX + (tipWidth / 2)} y={tipY + 42} textAnchor="middle" fill="#94a3b8" fontSize="10" className="uppercase">{point.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</text>
 
-                    {(() => {
-                        const start = dataPoints[0].date;
-                        const end = dataPoints[dataPoints.length - 1].date;
-                        const isSameYear = start.getFullYear() === end.getFullYear();
-                        const isSameMonth = isSameYear && start.getMonth() === end.getMonth();
-                        const formatOpts: Intl.DateTimeFormatOptions = isSameMonth ? { day: '2-digit', month: 'short' } : { month: 'short', year: '2-digit' };
-                        return (
-                            <>
-                                <text x={getX(start)} y={height - 5} textAnchor="start" style={{ fontSize: fontSizeAxis }} className="fill-slate-400 font-medium">{start.toLocaleDateString('pt-BR', formatOpts)}</text>
-                                <text x={getX(end)} y={height - 5} textAnchor="end" style={{ fontSize: fontSizeAxis }} className="fill-slate-400 font-medium">{end.toLocaleDateString('pt-BR', formatOpts)}</text>
-                            </>
-                        );
-                    })()}
+                                    {point.source === 'manual' && onDeleteWeight && (
+                                        <g
+                                            onPointerDown={(e) => {
+                                                // SOLUÇÃO DA RACE CONDITION:
+                                                // 1. Prevenir QUALQUER propagação (pointer é mais confiável que click em SVG)
+                                                e.stopPropagation();
+                                                e.preventDefault();
 
-                    {dataPoints.map((point, i) => (
-                        <g
-                            key={i}
-                            onClick={(e) => { e.stopPropagation(); setSelectedIndex(selectedIndex === i ? null : i); }}
-                            style={{ cursor: 'pointer', pointerEvents: 'auto' }}
-                        >
-                            <circle cx={getX(point.date)} cy={getY(point.weight)} r={20} fill="transparent" />
-                            <circle
-                                cx={getX(point.date)}
-                                cy={getY(point.weight)}
-                                r={selectedIndex === i ? circleRadius + 2 : circleRadius}
-                                className={`fill-white stroke-blue-500 stroke-[2] transition-all ${selectedIndex === i ? 'stroke-blue-600' : ''}`}
-                            />
-                        </g>
-                    ))}
+                                                // 2. Capturar os dados do ponto ANTES de qualquer mudança de estado
+                                                const pointToDelete = { ...point };
 
-                    {/* TOOLTIP BLINDADO */}
-                    {selectedIndex !== null && dataPoints[selectedIndex] && (() => {
-                        const point = dataPoints[selectedIndex];
-                        const x = getX(point.date);
-                        const y = getY(point.weight);
-                        const tipWidth = 110;
-                        const tipHeight = 55;
-                        const tipX = x - (tipWidth / 2);
-                        const tipY = y - tipHeight - 12;
-                        const safeX = Math.max(padding.left, Math.min(tipX, width - padding.right - tipWidth));
+                                                // 3. Notificar o PAI PRIMEIRO (síncrono) - Isso garante que setWeightToDelete seja chamado
+                                                onDeleteWeight(pointToDelete);
 
-                        return (
-                            <g className="animate-in fade-in zoom-in-95 duration-200" filter="url(#shadow)" style={{ pointerEvents: 'auto' }}>
-                                <rect x={safeX} y={tipY} width={tipWidth} height={tipHeight} rx="8" fill="#1e293b" />
-                                <path d={`M ${x - 6} ${tipY + tipHeight} L ${x} ${tipY + tipHeight + 6} L ${x + 6} ${tipY + tipHeight} Z`} fill="#1e293b" />
-                                <text x={safeX + (tipWidth / 2)} y={tipY + 22} textAnchor="middle" fill="white" fontWeight="bold" fontSize="14">{point.weight} kg</text>
-                                <text x={safeX + (tipWidth / 2)} y={tipY + 42} textAnchor="middle" fill="#94a3b8" fontSize="10" className="uppercase">{point.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</text>
-
-                                {point.source === 'manual' && onDeleteWeight && (
-                                    <g
-                                        onPointerDown={(e) => {
-                                            // SOLUÇÃO DA RACE CONDITION:
-                                            // 1. Prevenir QUALQUER propagação (pointer é mais confiável que click em SVG)
-                                            e.stopPropagation();
-                                            e.preventDefault();
-
-                                            // 2. Capturar os dados do ponto ANTES de qualquer mudança de estado
-                                            const pointToDelete = { ...point };
-
-                                            // 3. Notificar o PAI PRIMEIRO (síncrono) - Isso garante que setWeightToDelete seja chamado
-                                            onDeleteWeight(pointToDelete);
-
-                                            // 4. SÓ DEPOIS fechar o tooltip (próximo tick para garantir que o pai processou)
-                                            requestAnimationFrame(() => {
-                                                setSelectedIndex(null);
-                                            });
-                                        }}
-                                        style={{ cursor: 'pointer', pointerEvents: 'auto' }}
-                                    >
-                                        <circle cx={safeX + tipWidth} cy={tipY} r={18} fill="transparent" />
-                                        <circle cx={safeX + tipWidth} cy={tipY} r={10} fill="#ef4444" stroke="white" strokeWidth="2" />
-                                        <path d={`M ${safeX + tipWidth - 3} ${tipY - 3} L ${safeX + tipWidth + 3} ${tipY + 3} M ${safeX + tipWidth + 3} ${tipY - 3} L ${safeX + tipWidth - 3} ${tipY + 3}`} stroke="white" strokeWidth="2" strokeLinecap="round" />
-                                    </g>
-                                )}
-                            </g>
-                        );
-                    })()}
-                </svg>
-            </div>
+                                                // 4. SÓ DEPOIS fechar o tooltip (próximo tick para garantir que o pai processou)
+                                                requestAnimationFrame(() => {
+                                                    setSelectedIndex(null);
+                                                });
+                                            }}
+                                            style={{ cursor: 'pointer', pointerEvents: 'auto' }}
+                                        >
+                                            <circle cx={safeX + tipWidth} cy={tipY} r={18} fill="transparent" />
+                                            <circle cx={safeX + tipWidth} cy={tipY} r={10} fill="#ef4444" stroke="white" strokeWidth="2" />
+                                            <path d={`M ${safeX + tipWidth - 3} ${tipY - 3} L ${safeX + tipWidth + 3} ${tipY + 3} M ${safeX + tipWidth + 3} ${tipY - 3} L ${safeX + tipWidth - 3} ${tipY + 3}`} stroke="white" strokeWidth="2" strokeLinecap="round" />
+                                        </g>
+                                    )}
+                                </g>
+                            );
+                        })()}
+                    </svg>
+                </div>
+            )}
         </div>
     );
 };

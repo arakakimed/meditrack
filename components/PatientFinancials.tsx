@@ -24,10 +24,19 @@ const formatCurrency = (value: number) => {
     return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+// TIMEZONE-SAFE: Parse date string manually to avoid UTC conversion issues
+const parseSafeDate = (dateString: string): Date => {
+    if (!dateString) return new Date();
+    const cleanDate = dateString.includes('T') ? dateString.split('T')[0] : dateString;
+    const [year, month, day] = cleanDate.split('-').map(Number);
+    if (!year || !month || !day) return new Date(dateString);
+    return new Date(year, month - 1, day);
+};
+
 const formatDate = (dateString: string) => {
     if (!dateString) return '-';
     try {
-        const date = new Date(dateString);
+        const date = parseSafeDate(dateString);
         return date.toLocaleDateString('pt-BR');
     } catch (e) {
         return dateString;
@@ -138,7 +147,7 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
     const smartChoiceData = useMemo(() => {
         // 1. Filtragem e Ordenação: Achar primeira dose Mounjaro (>= 2.5)
         const sorted = [...injections].sort((a, b) =>
-            new Date(a.applicationDate || a.date).getTime() - new Date(b.applicationDate || b.date).getTime()
+            parseSafeDate(a.applicationDate || a.date).getTime() - parseSafeDate(b.applicationDate || b.date).getTime()
         );
 
         const startIndex = sorted.findIndex(inj => {
@@ -152,7 +161,7 @@ export const PatientFinancials: React.FC<PatientFinancialsProps> = ({ patient, i
         const mounjaroPhase = sorted.slice(startIndex);
         if (mounjaroPhase.length === 0) return null;
 
-        const firstDate = new Date(mounjaroPhase[0].applicationDate || mounjaroPhase[0].date);
+        const firstDate = parseSafeDate(mounjaroPhase[0].applicationDate || mounjaroPhase[0].date);
 
         // 2. Benchmarks de Mercado
         const CONSULT_PRICE = 600; // Preço atualizado conforme pedido

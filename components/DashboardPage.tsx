@@ -82,6 +82,16 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
         return TAG_COLORS.find(c => c.name === tagInfo.color) || TAG_COLORS[4];
     };
 
+    // TIMEZONE-SAFE: Parse date string manually to avoid UTC conversion issues
+    const formatSafeDate = (dateStr: string) => {
+        if (!dateStr) return '';
+        const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+        const [year, month, day] = cleanDate.split('-').map(Number);
+        if (!year || !month || !day) return dateStr;
+        const d = new Date(year, month - 1, day);
+        return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+    };
+
     return (
         <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 pb-24">
             {/* Header - AJUSTE O NOME AQUI */}
@@ -157,7 +167,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
                                                     </span>
                                                 )}
                                                 <span className="text-xs text-slate-400 font-medium">
-                                                    • {new Date(item.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} • {item.dosage}
+                                                    • {formatSafeDate(item.date)} • {item.dosage}
                                                 </span>
                                             </div>
                                         </div>

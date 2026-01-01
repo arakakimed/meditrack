@@ -2,6 +2,7 @@
 export interface Patient {
     id: string;
     name: string;
+    email?: string;  // E-mail do paciente para acesso ao app
     avatarUrl?: string;
     initials: string;
     age: number;

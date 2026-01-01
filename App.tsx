@@ -188,8 +188,6 @@ const App: React.FC = () => {
                     onEditPatient={handleEditPatient}
                     onAddPatient={handleAddPatient}
                     onManageTags={() => setIsTagModalOpen(true)}
-                    onToggleAccess={handleToggleAccess} // Função conectada
-                    onDeletePatient={handleDeletePatient} // Função conectada
                 />;
             case 'schedule': return <SchedulePage />;
             case 'medications': return <MedicationsPage />;
