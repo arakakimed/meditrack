@@ -282,7 +282,7 @@ const PatientProfilePage: React.FC<{ patient: Patient, onBack: () => void, onGoH
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const { data: patientData } = await supabase.from('patients').select('*').eq('id', patient.id).single();
+            const { data: patientData } = await supabase.from('patients').select('*').eq('id', patient.id).maybeSingle();
             if (patientData) {
                 setRealPatient({
                     id: patientData.id,

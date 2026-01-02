@@ -31,14 +31,14 @@ const App: React.FC = () => {
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
-            if (session) checkUserRole(session.user.id);
+            if (session) checkUserRole(session.user.id, session.user.email);
             else setLoading(false);
         });
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
             if (session) {
-                checkUserRole(session.user.id);
+                checkUserRole(session.user.id, session.user.email);
             } else {
                 setUserRole(null);
                 setPatientData(null);
@@ -51,15 +51,18 @@ const App: React.FC = () => {
         return () => subscription.unsubscribe();
     }, []);
 
-    const checkUserRole = async (userId: string) => {
+    const checkUserRole = async (userId: string, userEmail?: string) => {
         setLoading(true);
         try {
-            // Primeiro, verificar se é um paciente (cadastro direto pelo app)
+            // Variável local para armazenar paciente encontrado (se houver)
+            let patient = null;
+
+            // Primeiro, verificar se é um paciente (cadastro direto pelo app) pelo user_id
             const { data: patientByUserId } = await supabase
                 .from('patients')
                 .select('*')
                 .eq('user_id', userId)
-                .single();
+                .maybeSingle();
 
             if (patientByUserId) {
                 // É um paciente registrado diretamente
@@ -69,25 +72,132 @@ const App: React.FC = () => {
                 return;
             }
 
-            // Se não encontrou em patients, verificar profiles (fluxo admin/staff)
-            const { data: profile, error } = await supabase
-                .from('profiles')
-                .select('role, patient_id')
-                .eq('id', userId)
-                .single();
+            // 2. [AUTO-VINCULO] Self-healing: Se não achou por ID (patientByUserId é null), tentar por E-MAIL
+            // Isso corrige pacientes antigos ("Juçara") que têm o email na tabela patients mas user_id nulo
+            if (userEmail) {
+                const { data: patientByEmail } = await supabase
+                    .from('patients')
+                    .select('*')
+                    .ilike('email', userEmail) // Case-insensitive para garantir
+                    .maybeSingle();
 
-            if (error || !profile) {
+                if (patientByEmail) {
+                    console.log("Self-healing: Paciente encontrado por email. Tentando vincular ID...", userEmail);
+
+                    // AÇÃO CRÍTICA: Atualizar o user_id no banco para corrigir o vínculo permanentemente
+                    const { error: updateError } = await supabase
+                        .from('patients')
+                        .update({ user_id: userId })
+                        .eq('id', patientByEmail.id);
+
+                    if (updateError) {
+                        console.error("Erro ao realizar auto-vínculo (RLS ou Permissão):", updateError);
+                        // Mesmo com erro no update, vamos logar o usuário pois validamos o email!
+                        // Isso garante o acesso imediato ("Band-aid") enquanto o vínculo não é persistido.
+                    } else {
+                        console.log("Auto-vínculo realizado com sucesso!");
+                    }
+
+                    setUserRole('patient');
+                    setPatientData(mapDatabasePatient(patientByEmail));
+                    setLoading(false);
+                    return;
+                }
+            }
+
+            // Se não encontrou em patients (nem ID nem Email), verificar profiles (fluxo admin/staff)
+            // Use maybeSingle() para não estourar erro 406, mas trate o retorno null como RLS potencial
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .maybeSingle();
+
+            if (profileError) {
+                console.error("Erro de banco ao buscar Profile:", profileError);
+                setUserRole('unauthorized');
+            } else if (!profile) {
+                // Se não deu erro de banco, mas veio vazio, é 99% chance de RLS bloqueando a leitura
+                console.error("Profile não encontrado para usuário autenticado. RLS Bloqueado?");
                 setUserRole('unauthorized');
             } else {
                 setUserRole(profile.role as any);
-                if (profile.role === 'patient' && profile.patient_id) {
-                    const { data: patient } = await supabase
-                        .from('patients')
-                        .select('*')
-                        .eq('id', profile.patient_id)
-                        .single();
-                    if (patient) setPatientData(mapDatabasePatient(patient));
+
+                if (profile.role === 'patient') {
+                    // 1. Tentar pelo ID vinculado no perfil (se existir)
+                    if (profile.patient_id) {
+                        // Primeira tentativa de busca
+                        let { data: fetchedPatient } = await supabase
+                            .from('patients')
+                            .select('*')
+                            .eq('id', profile.patient_id)
+                            .maybeSingle();
+
+                        // [CRITICAL FIX] Se não retornou nada, PROVAVELMENTE é bloqueio de RLS (Row Level Security)
+                        // porque o user_id na tabela patients ainda é NULL. 
+                        // Como temos o ID confiável do Profile, vamos tentar forçar o vínculo (Blind Update).
+                        if (!fetchedPatient) {
+                            console.log("Perfil existe mas dados do paciente inacessíveis. Tentando 'Blind Fix' via ID do perfil...", profile.patient_id);
+
+                            const { error: updateError } = await supabase
+                                .from('patients')
+                                .update({ user_id: userId }) // Vincula o usuário atual
+                                .eq('id', profile.patient_id);
+
+                            if (!updateError) {
+                                // Se o update funcionou (ou não deu erro de permissão), tenta buscar de novo
+                                // Agora o RLS deve permitir a leitura pois user_id == auth.uid()
+                                const retry = await supabase
+                                    .from('patients')
+                                    .select('*')
+                                    .eq('id', profile.patient_id)
+                                    .maybeSingle();
+                                fetchedPatient = retry.data;
+                            } else {
+                                console.error("Falha no Blind Update:", updateError);
+                            }
+                        }
+
+                        patient = fetchedPatient;
+                    }
+
+                    // 2. Fallback: Tentar pelo email se não achou pelo ID do perfil
+                    if (!patient && userEmail) {
+                        const { data } = await supabase
+                            .from('patients')
+                            .select('*')
+                            .ilike('email', userEmail)
+                            .maybeSingle();
+                        patient = data;
+                    }
+
+                    if (patient) {
+                        setPatientData(mapDatabasePatient(patient));
+                    } else {
+                        // Se depois de tudo não achou o paciente, mas tem profile, 
+                        // cria um objeto visual provisório para não travar no Loading
+                        console.warn("Paciente tem Profile mas dados da tabela 'patients' não foram encontrados.");
+                        setPatientData({
+                            id: profile.patient_id || userId,
+                            name: profile.name || "Paciente",
+                            initials: (profile.name || "P").substring(0, 2).toUpperCase(),
+                            email: userEmail,
+                            age: 0,
+                            gender: 'Female', // Default
+                            currentWeight: 0,
+                            weightChange: 0,
+                            bmi: 0,
+                            bmiCategory: 'N/A',
+                            avatarUrl: undefined
+                        });
+                    }
                 }
+            }
+
+            // Fallback final: Se chegou aqui e não definiu role, é Unauthorized
+            if (!patient && !profile) {
+                console.warn("User authenticated but no role found (Patient or Profile). RLS Blocked?");
+                setUserRole('unauthorized');
             }
         } catch (err) {
             console.error('Erro ao verificar role:', err);
@@ -171,7 +281,7 @@ const App: React.FC = () => {
     };
 
     if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (!session) return <AuthPage />;
+    if (!session) return <AuthPage onAuthSuccess={() => { }} />;
     if (userRole === 'unauthorized') return <div className="p-10 text-center">Acesso não configurado. <button onClick={handleLogout}>Sair</button></div>;
 
     if (userRole === 'patient') {

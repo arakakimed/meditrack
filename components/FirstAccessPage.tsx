@@ -16,7 +16,7 @@ const FirstAccessPage: React.FC<FirstAccessPageProps> = ({ onSuccess }) => {
             try {
                 const { data: { user } } = await supabase.auth.getUser();
                 if (user) {
-                    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+                    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
                     if (!profile || (profile.role !== 'Admin' && profile.role !== 'Staff' && profile.role !== 'Patient')) {
                         console.log('FirstAccess: Setting user role to Patient...');
                         await supabase.from('profiles').upsert({

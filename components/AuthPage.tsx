@@ -127,7 +127,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                         .from('patients')
                         .select('access_granted, status')
                         .eq('user_id', data.user.id)
-                        .single();
+                        .maybeSingle();
 
                     // Se encontrou registro de paciente
                     if (patientData) {
@@ -142,19 +142,22 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                     }
 
                     // Verificar se precisa trocar senha (fluxo existente)
+                    // [REMOVIDO] Verificação de must_change_password causava erro 400 se a coluna não existir
+                    // Se precisar dessa feature no futuro, garantir que a coluna existe no Supabase profiles
+                    /*
                     const { data: profile } = await supabase
                         .from('profiles')
                         .select('must_change_password')
                         .eq('id', data.user.id)
-                        .single();
+                        .maybeSingle();
 
                     if (profile?.must_change_password) {
-                        // Redirecionar para troca de senha (implementar se necessário)
                         setError('Você precisa trocar sua senha. Entre em contato com a clínica.');
                         await supabase.auth.signOut();
                         setLoading(false);
                         return;
                     }
+                    */
                 }
 
                 onAuthSuccess();

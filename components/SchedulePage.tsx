@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { Patient, Appointment } from '../types';
 import NewAppointmentModal from './NewAppointmentModal';
@@ -41,7 +41,7 @@ const CalendarHeader: React.FC<{
     onNextMonth: () => void;
     onToday: () => void;
     onNewAppointment: () => void;
-}> = ({ currentDate, onPrevMonth, onNextMonth, onToday, onNewAppointment }) => (
+}> = React.memo(({ currentDate, onPrevMonth, onNextMonth, onToday, onNewAppointment }) => (
     <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-1">
             <button onClick={onPrevMonth} className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
@@ -72,7 +72,7 @@ const CalendarHeader: React.FC<{
             </button>
         </div>
     </div>
-);
+));
 
 // Appointment Card Component with Tag Colors - Minimalist Design
 const AppointmentListItem: React.FC<{
@@ -83,7 +83,7 @@ const AppointmentListItem: React.FC<{
     onEdit?: (event: CalendarEvent) => void;
     onDelete?: (event: CalendarEvent) => void;
     onStatusChange?: (event: CalendarEvent, status: string) => void;
-}> = ({ event, tagMap, onViewPatient, onEdit, onDelete, onStatusChange }) => {
+}> = React.memo(({ event, tagMap, onViewPatient, onEdit, onDelete, onStatusChange }) => {
     const [showMenu, setShowMenu] = useState(false);
     const menuRef = React.useRef<HTMLDivElement>(null);
 
@@ -97,11 +97,6 @@ const AppointmentListItem: React.FC<{
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const handleMenuAction = (action: () => void, e: React.MouseEvent) => {
-        e.stopPropagation();
-        setShowMenu(false);
-        action();
-    };
     const firstTagId = event.patientTags?.[0];
     const tagData = firstTagId ? tagMap[firstTagId] : null;
     const tagColorName = tagData?.color || 'Slate';
@@ -114,7 +109,6 @@ const AppointmentListItem: React.FC<{
             <div
                 onClick={() => {
                     if (!showMenu) {
-                        console.log('Patient card clicked! Patient ID:', event.patientId);
                         onViewPatient(event.patientId);
                     }
                 }}
@@ -203,8 +197,8 @@ const AppointmentListItem: React.FC<{
                             setShowMenu(!showMenu);
                         }}
                         className={`p-2 rounded-full transition-all ${showMenu
-                                ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'
-                                : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+                            ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'
+                            : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
                             }`}
                     >
                         <span className="material-symbols-outlined text-lg transition-transform duration-200" style={{ transform: showMenu ? 'rotate(180deg)' : 'rotate(0deg)' }}>
@@ -266,7 +260,7 @@ const AppointmentListItem: React.FC<{
             </div>
         </div>
     );
-};
+});
 
 const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = ({ onViewPatient }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -282,19 +276,23 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
     const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
 
     useEffect(() => {
-        fetchEvents();
-        fetchTags();
+        // PERFORMANCE: Batch fetching
+        const loadData = async () => {
+            setLoading(true);
+            await fetchTags();
+            await fetchEvents();
+            setLoading(false);
+        };
+        loadData();
     }, [currentDate]);
 
     const fetchTags = async () => {
         const { data, error } = await supabase.from('clinic_tags').select('id, name, color');
         if (!error && data) {
-            console.log('Fetched tags from clinic_tags:', data);
             const map: TagMap = {};
             data.forEach(tag => {
                 map[tag.id] = { name: tag.name, color: tag.color };
             });
-            console.log('TagMap created:', map);
             setTagMap(map);
         } else {
             console.error('Error fetching tags:', error);
@@ -302,7 +300,6 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
     };
 
     const fetchEvents = async () => {
-        setLoading(true);
         // Extend range to include visible days from adjacent months (typically 6 weeks max = 42 days)
         // Start 7 days before month start, end 14 days after month end to be safe
         const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
@@ -314,47 +311,36 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
         const fetchEndDate = new Date(endOfMonth);
         fetchEndDate.setDate(fetchEndDate.getDate() + 14);
 
-        console.log('Fetching events for extended range:', {
-            monthStart: startOfMonth.toLocaleDateString(),
-            monthEnd: endOfMonth.toLocaleDateString(),
-            fetchStart: fetchStartDate.toLocaleDateString(),
-            fetchEnd: fetchEndDate.toLocaleDateString()
-        });
-
+        // PERFORMANCE: Single Query for patients to avoid N+1 if possible, but structure requires iteration usually.
+        // Optimizing: Fetch ONLY needed fields.
         const { data: patients, error: patientsError } = await supabase
             .from('patients')
             .select('id, name, avatar_url, tags');
 
         if (patientsError || !patients) {
             console.error('Error fetching patients:', patientsError);
-            setLoading(false);
             return;
         }
 
-        console.log('Found patients:', patients.length);
-
         const allEvents: CalendarEvent[] = [];
 
-        for (const patient of patients) {
-            // Fetch injections using 'applied_at' or 'created_at' as date field
-            const { data: injections, error: injectionsError } = await supabase
+        // PERFORMANCE: Parallelize requests instead of serial loop
+        const promises = patients.map(async (patient) => {
+            const patientEvents: CalendarEvent[] = [];
+
+            // Fetch injections with date filter
+            const { data: injections } = await supabase
                 .from('injections')
                 .select('id, applied_at, created_at, dosage, status')
                 .eq('patient_id', patient.id)
                 .gte('applied_at', fetchStartDate.toISOString().split('T')[0])
                 .lte('applied_at', fetchEndDate.toISOString().split('T')[0]);
 
-            if (injectionsError) {
-                console.error('Error fetching injections for patient:', patient.id, injectionsError);
-            }
-
-            if (injections && injections.length > 0) {
-                console.log(`Found ${injections.length} injections for patient:`, patient.name);
+            if (injections) {
                 injections.forEach(inj => {
                     const initials = patient.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
                     const dateSource = inj.applied_at || inj.created_at;
 
-                    // Parse date as local date at noon (same logic as PatientProfilePage)
                     let eventDate: Date;
                     if (typeof dateSource === 'string') {
                         const datePart = dateSource.split('T')[0];
@@ -364,9 +350,7 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
                         eventDate = new Date(dateSource);
                     }
 
-                    console.log(`Injection date: ${dateSource} -> Parsed as: ${eventDate.toLocaleDateString()}`);
-
-                    allEvents.push({
+                    patientEvents.push({
                         id: inj.id,
                         date: eventDate,
                         patientId: patient.id,
@@ -381,24 +365,18 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
                 });
             }
 
-            // Fetch medication steps with 'date' field
-            const { data: steps, error: stepsError } = await supabase
+            // Fetch medication steps with date filter
+            const { data: steps } = await supabase
                 .from('medication_steps')
                 .select('id, patient_id, date, dosage, status, details, progress, current_week, total_weeks, is_skipped, order_index')
                 .eq('patient_id', patient.id)
                 .gte('date', fetchStartDate.toISOString().split('T')[0])
                 .lte('date', fetchEndDate.toISOString().split('T')[0]);
 
-            if (stepsError) {
-                console.error('Error fetching medication_steps for patient:', patient.id, stepsError);
-            }
-
-            if (steps && steps.length > 0) {
-                console.log(`Found ${steps.length} medication steps for patient:`, patient.name);
+            if (steps) {
                 steps.forEach(step => {
                     const initials = patient.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
 
-                    // Parse date as local date at noon
                     let stepDate: Date;
                     if (typeof step.date === 'string') {
                         const datePart = step.date.split('T')[0];
@@ -408,13 +386,10 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
                         stepDate = new Date(step.date);
                     }
 
-                    console.log(`Step date: ${step.date} -> Parsed as: ${stepDate.toLocaleDateString()}`);
-
-                    // Determine if cancelled based on is_skipped or status
                     const isCancelled = step.is_skipped === true || step.status === 'Cancelado';
                     const displayStatus = isCancelled ? 'Cancelado' : (step.status || 'Scheduled');
 
-                    allEvents.push({
+                    patientEvents.push({
                         id: step.id,
                         date: stepDate,
                         patientId: patient.id,
@@ -427,7 +402,6 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
                         dosage: step.dosage ? `${step.dosage} mg` : undefined,
                         isCancelled: isCancelled,
                         journeyStatus: step.status,
-                        // Mapping fields for edit
                         details: step.details,
                         progress: step.progress,
                         current_week: step.current_week,
@@ -437,64 +411,62 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
                     });
                 });
             }
-        }
+            return patientEvents;
+        });
 
-        console.log('Total events found:', allEvents.length);
-        console.log('Events:', allEvents);
+        const results = await Promise.all(promises);
+        results.forEach(pEvents => allEvents.push(...pEvents));
+
         setEvents(allEvents);
-        setLoading(false);
     };
 
-    const handlePrevMonth = () => setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-    const handleNextMonth = () => setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-    const handleToday = () => {
+    const handlePrevMonth = useCallback(() => setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1)), []);
+    const handleNextMonth = useCallback(() => setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1)), []);
+
+
+    const handleToday = useCallback(() => {
         const today = new Date();
         setCurrentDate(today);
         setSelectedDate(today);
         setTimeout(() => {
             document.getElementById('appointment-list')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }, 100);
-    };
+    }, []);
 
-    const isToday = (date: Date) => {
+    const isToday = useCallback((date: Date) => {
         const today = new Date();
         return date.getDate() === today.getDate() &&
             date.getMonth() === today.getMonth() &&
             date.getFullYear() === today.getFullYear();
-    };
+    }, []);
 
-    const isSameDay = (date1: Date | null, date2: Date) => {
+    const isSameDay = useCallback((date1: Date | null, date2: Date) => {
         if (!date1) return false;
         return date1.getDate() === date2.getDate() &&
             date1.getMonth() === date2.getMonth() &&
             date1.getFullYear() === date2.getFullYear();
-    };
+    }, []);
 
-    const handleDayClick = (date: Date, hasEvents: boolean) => {
-        if (isSameDay(selectedDate, date)) {
-            setSelectedDate(null);
-        } else {
-            setSelectedDate(date);
-            setTimeout(() => {
-                document.getElementById('appointment-list')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }, 100);
-        }
-    };
+    const handleDayClick = useCallback((date: Date, hasEvents: boolean) => {
+        setSelectedDate(prev => {
+            if (isSameDay(prev, date)) return null;
+            return date;
+        });
+        // Scroll logic separated to avoid side effects in render/callback if possible, but ok here for interaction
+        setTimeout(() => {
+            document.getElementById('appointment-list')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 100);
+    }, [isSameDay]);
 
-    const handleEditEvent = (event: CalendarEvent) => {
-        if (event.type !== 'forecast') return; // Only editing forecast steps for now
+    const handleEditEvent = useCallback((event: CalendarEvent) => {
+        if (event.type !== 'forecast') return;
 
-        // Construct MedicationStep-like object
         const step = {
             id: event.id,
             dosage: event.dosage || '',
             status: event.status as any,
-            details: (event as any).details || '', // Use mapped detail or fallback
-            date: event.date.toISOString().split('T')[0], // Extract YYYY-MM-DD
-            // If we had more fields in CalendarEvent we would map them here
-            // We need to fetch or ensure we have all data. 
-            // Luckily we added them to fetchEvents mapping above!
-            // details mapped above
+            details: (event as any).details || '',
+            date: event.date.toISOString().split('T')[0],
             progress: (event as any).progress,
             current_week: (event as any).current_week,
             total_weeks: (event as any).total_weeks,
@@ -505,9 +477,9 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
         setEditingStep(step);
         setEditingPatientId(event.patientId);
         setIsEditModalOpen(true);
-    };
+    }, []);
 
-    const handleDeleteEvent = async (event: CalendarEvent) => {
+    const handleDeleteEvent = useCallback(async (event: CalendarEvent) => {
         if (!confirm('Tem certeza que deseja excluir este agendamento? Esta ação não pode ser desfeita.')) return;
 
         const table = event.type === 'forecast' ? 'medication_steps' : 'injections';
@@ -519,14 +491,14 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
                 .eq('id', event.id);
 
             if (error) throw error;
-            fetchEvents();
+            fetchEvents(); // Re-fetch to update UI
         } catch (err) {
             console.error('Error deleting event:', err);
             alert('Erro ao excluir agendamento.');
         }
-    };
+    }, [fetchEvents]); // Depend on fetchEvents to refresh
 
-    const handleStatusChangeEvent = async (event: CalendarEvent, newStatus: string) => {
+    const handleStatusChangeEvent = useCallback(async (event: CalendarEvent, newStatus: string) => {
         const table = event.type === 'forecast' ? 'medication_steps' : 'injections';
 
         try {
@@ -541,40 +513,21 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
             console.error('Error updating status:', err);
             alert('Erro ao atualizar status.');
         }
-    };
+    }, [fetchEvents]);
 
-    const getTagColor = (tagId: string | undefined) => {
-        if (!tagId) {
-            console.log('No tagId provided, returning default color');
-            return '#94a3b8';
-        }
+    // PERFORMANCE: Memoized Helper for Tag Colors
+    // This was the source of lag: excessive console logging and recalculation inside render loops
+    const getTagColor = useCallback((tagId: string | undefined) => {
+        if (!tagId) return '#94a3b8';
         const tag = tagMap[tagId];
-        if (!tag) {
-            console.log('Tag not found in tagMap for ID:', tagId);
-            return '#94a3b8';
-        }
+        if (!tag) return '#94a3b8';
         const colorData = TAG_COLORS.find(c => c.name === tag.color);
-        const hexColor = colorData?.hex || '#94a3b8';
-        console.log(`Tag "${tag.name}" (${tag.color}) -> ${hexColor}`);
-        return hexColor;
-    };
-
-    const getUniqueDotColors = (events: CalendarEvent[]) => {
-        const colorSet = new Set<string>();
-        console.log('Getting colors for events:', events.length);
-        events.forEach(ev => {
-            console.log('Event patient tags:', ev.patientTags);
-            const tagId = ev.patientTags?.[0];
-            const color = getTagColor(tagId);
-            colorSet.add(color);
-        });
-        const uniqueColors = Array.from(colorSet).slice(0, 3);
-        console.log('Unique colors for dots:', uniqueColors);
-        return uniqueColors;
-    };
+        return colorData?.hex || '#94a3b8';
+    }, [tagMap]);
 
     const getDateKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 
+    // PERFORMANCE: Memoize the events grouping
     const eventsByDay = useMemo(() => {
         const map: { [key: string]: CalendarEvent[] } = {};
         events.forEach(event => {
@@ -583,30 +536,26 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
             map[key].push(event);
         });
 
-        // Filter duplicates: remove 'forecast' if 'injection' exists for same patient on same day
+        // Filter duplicates logic
         Object.keys(map).forEach(key => {
             const dayEvents = map[key];
-            // Get all patients who have an injection on this day
             const patientsWithInjection = new Set(
                 dayEvents
                     .filter(e => e.type === 'injection')
                     .map(e => e.patientId)
             );
 
-            // Filter out forecasts for patients who already have an injection
             map[key] = dayEvents.filter(event => {
-                // Keep all injections
                 if (event.type === 'injection') return true;
-                // Keep forecasts only if patient doesn't have an injection on this day
                 if (event.type === 'forecast' && patientsWithInjection.has(event.patientId)) {
-                    return false; // Remove this forecast
+                    return false;
                 }
                 return true;
             });
         });
 
         return map;
-    }, [events]);
+    }, [events]); // Only recalculate if events change
 
     const calendarDays = useMemo(() => {
         const year = currentDate.getFullYear();
@@ -668,9 +617,25 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
                         const dayKey = getDateKey(date);
                         const dayEvents = eventsByDay[dayKey] || [];
                         const hasEvents = dayEvents.length > 0;
-                        const isSelected = isSameDay(selectedDate, date);
+                        const isSelected = isSelectedDay(selectedDate, date); // Create helper for cleaner render
                         const isTodayDay = isToday(date);
-                        const uniqueColors = getUniqueDotColors(dayEvents);
+
+                        // PERFORMANCE: Calculate colors inline efficiently or use Memo if complex
+                        // Basic set logic is fast enough here if console logs are removed
+                        const uniqueColors = (() => {
+                            if (!hasEvents) return [];
+                            const colorSet = new Set<string>();
+                            let count = 0;
+                            for (const ev of dayEvents) {
+                                if (count >= 3) break; // Limit processing
+                                const color = getTagColor(ev.patientTags?.[0]);
+                                if (!colorSet.has(color)) {
+                                    colorSet.add(color);
+                                    count++;
+                                }
+                            }
+                            return Array.from(colorSet).slice(0, 3);
+                        })();
 
                         return (
                             <div
@@ -798,19 +763,26 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
                         setEditingStep(null);
                         setEditingPatientId(null);
                     }}
-                    onSuccess={() => {
+                    patientId={editingPatientId}
+                    step={editingStep}
+                    onSave={() => {
+                        fetchEvents();
                         setIsEditModalOpen(false);
                         setEditingStep(null);
                         setEditingPatientId(null);
-                        fetchEvents();
                     }}
-                    patientId={editingPatientId}
-                    stepToEdit={editingStep}
-                    nextOrderIndex={0} // Not used when editing
                 />
             )}
         </div>
     );
 };
 
-export default SchedulePage;
+// Helper to avoid recreating functions in render loop
+function isSelectedDay(selected: Date | null, current: Date) {
+    if (!selected) return false;
+    return selected.getDate() === current.getDate() &&
+        selected.getMonth() === current.getMonth() &&
+        selected.getFullYear() === current.getFullYear();
+}
+
+export default React.memo(SchedulePage);

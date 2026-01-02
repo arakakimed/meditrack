@@ -522,7 +522,7 @@ const Layout: React.FC<LayoutProps> = ({ view, setView, onOpenGlobalDose, childr
                         .from('profiles')
                         .select('*')
                         .eq('id', user.id)
-                        .single();
+                        .maybeSingle();
 
                     if (!error && data) {
                         profileData = data;
