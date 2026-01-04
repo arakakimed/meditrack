@@ -9,6 +9,26 @@ const Login: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // Limpeza automática de sessão ao acessar a página de login
+    useEffect(() => {
+        const clearOldSession = async () => {
+            try {
+                // Verifica se existe uma sessão antiga
+                const { data: { session } } = await supabase.auth.getSession();
+
+                // Se existe sessão mas o usuário está na página de login,
+                // significa que ele quer fazer um novo login -> limpar sessão antiga
+                if (session) {
+                    await supabase.auth.signOut();
+                }
+            } catch (error) {
+                console.error('Erro ao limpar sessão antiga:', error);
+            }
+        };
+
+        clearOldSession();
+    }, []);
+
     // Limpa estados ao desmontar para evitar vazamento de memória
     useEffect(() => {
         return () => setLoading(false);

@@ -154,18 +154,17 @@ const AdminPanel: React.FC = () => {
 
             {/* SIDEBAR MOBILE (Menu Inferior) */}
             <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200 z-50 safe-area-bottom">
-                <div className={`grid ${isAdmin ? 'grid-cols-6' : 'grid-cols-3'} gap-0.5 px-1 py-1.5`}>
-                    {/* Ajustei grid-cols para 3 quando não for admin (Dashboard, Pacientes, Agenda) */}
+                <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-3'} gap-0.5 px-1 py-1.5`}>
+                    {/* Botões básicos - disponíveis para todos (Admin e Staff) */}
                     <MobileNavItem icon="dashboard" label="Painel" active={currentView === 'dashboard' && !adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }} />
                     <MobileNavItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
                     <MobileNavItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
 
-                    {/* Itens Admin Mobile */}
+                    {/* Botões exclusivos do Admin Mobile */}
                     {isAdmin && (
                         <>
                             <MobileNavItem icon="payments" label="Finanças" active={currentView === 'financials'} onClick={() => { setAdminViewingPatient(null); setCurrentView('financials'); }} />
-                            <MobileNavItem icon="manage_accounts" label="Usuários" active={currentView === 'users'} onClick={() => { setAdminViewingPatient(null); setCurrentView('users'); }} />
-                            <MobileNavItem icon="settings" label="Ajustes" active={currentView === 'settings'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} />
+                            <MobileNavItem icon="settings" label="Ajustes" active={currentView === 'settings' || currentView === 'users'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} />
                         </>
                     )}
                 </div>
@@ -176,7 +175,13 @@ const AdminPanel: React.FC = () => {
                     <span className="font-bold text-slate-800">
                         {isAdmin ? 'MediTrack Admin' : 'MediTrack Staff'}
                     </span>
-                    <button onClick={handleLogout}><span className="material-symbols-outlined text-slate-500">logout</span></button>
+                    <button
+                        onClick={handleLogout}
+                        className="p-2 rounded-lg hover:bg-slate-100 active:bg-slate-200 transition-colors"
+                        aria-label="Sair"
+                    >
+                        <span className="material-symbols-outlined text-slate-500">logout</span>
+                    </button>
                 </header>
                 <div className="flex-1 overflow-y-auto p-0">{renderAdminContent()}</div>
             </main>

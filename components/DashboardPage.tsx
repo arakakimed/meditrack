@@ -87,19 +87,41 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
     };
 
     const [userName, setUserName] = useState('');
+    const [userGender, setUserGender] = useState<string | null>(null);
 
     useEffect(() => { fetchDashboardData(); }, []);
 
-    // Fetch User Name
+    // Função para formatar o tratamento baseado no gênero
+    const getHonorific = (gender: string | null): string => {
+        if (!gender) return 'Dr(a)';
+
+        const normalizedGender = gender.toLowerCase().trim();
+
+        if (normalizedGender === 'female' || normalizedGender === 'feminino' || normalizedGender === 'f') {
+            return 'Dra.';
+        } else if (normalizedGender === 'male' || normalizedGender === 'masculino' || normalizedGender === 'm') {
+            return 'Dr.';
+        }
+
+        return 'Dr(a)';  // Fallback para valores não reconhecidos
+    };
+
+    // Fetch User Name and Gender from profiles table
     useEffect(() => {
-        const getUserName = async () => {
+        const getUserData = async () => {
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
-                const name = user.user_metadata?.name || user.user_metadata?.full_name || 'Doutor(a)';
-                setUserName(name);
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('name, gender')
+                    .eq('id', user.id)
+                    .single();
+
+                setUserName(profile?.name || '');
+                setUserGender(profile?.gender || null);
             }
         };
-        getUserName();
+        getUserData();
     }, []);
 
     const getTagInfo = (tagId: string) => {
@@ -118,12 +140,17 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
         return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
     };
 
+    // Formatar saudação completa
+    const greeting = userName
+        ? `Olá, ${getHonorific(userGender)} ${userName}`
+        : `Olá, ${getHonorific(userGender)}`;
+
     return (
         <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 pb-24">
-            {/* Header - AJUSTE O NOME AQUI */}
+            {/* Header - SAUDAÇÃO PERSONALIZADA */}
             <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Olá, {userName || 'Dr. Renan Arakaki'}</h1>
+                    <h1 className="text-2xl font-bold text-slate-900">{greeting}</h1>
                     <p className="text-slate-500 text-sm capitalize">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
                 </div>
                 <div className="relative">
