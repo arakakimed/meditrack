@@ -110,6 +110,7 @@ export interface User {
     initials: string;
     role: UserRole;
     status: UserStatus;
+    gender?: 'Male' | 'Female';
     isManualPatient?: boolean;
 }
 

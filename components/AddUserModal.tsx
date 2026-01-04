@@ -14,10 +14,12 @@ interface AddUserModalProps {
 const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess, userToEdit, readOnlyRole = false }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [successMsg, setSuccessMsg] = useState<string | null>(null);
+    const [showConfirmation, setShowConfirmation] = useState(false);
+    const [createdUserCredentials, setCreatedUserCredentials] = useState<{ email: string, password?: string } | null>(null);
 
     // Form Fields
     const [name, setName] = useState('');
+    const [gender, setGender] = useState<'Male' | 'Female'>('Female');
     const [email, setEmail] = useState('');
     const [role, setRole] = useState<UserRole>('Staff');
 
@@ -48,12 +50,14 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
 
         if (isOpen) {
             setError(null);
-            setSuccessMsg(null);
+            setShowConfirmation(false);
+            setCreatedUserCredentials(null);
             setIsChangingPassword(false);
 
             if (userToEdit) {
                 // MODO EDIÇÃO
                 setName(userToEdit.name);
+                setGender(userToEdit.gender || 'Female');
                 setEmail(userToEdit.email);
                 setRole(userToEdit.role);
                 setCurrentPassword('');
@@ -62,6 +66,7 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
             } else {
                 // MODO NOVO USUÁRIO
                 setName('');
+                setGender('Female');
                 setEmail('');
                 setRole('Staff');
                 setPassword('');
@@ -75,7 +80,6 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
         e.preventDefault();
         setLoading(true);
         setError(null);
-        setSuccessMsg(null);
 
         try {
             if (userToEdit) {
@@ -86,6 +90,7 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                     .from('profiles')
                     .update({
                         name,
+                        gender,
                         role // TitleCase: 'Admin', 'Staff', 'Patient'
                     })
                     .eq('id', userToEdit.id);
@@ -103,20 +108,18 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                     if (passError) throw passError;
                 }
 
-                setSuccessMsg('Usuário atualizado com sucesso!');
-
                 const updatedUser = {
                     ...userToEdit,
                     name,
+                    gender,
                     role, // UI: Mantém TitleCase
                     initials: name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
                 };
 
-                setTimeout(() => {
-                    onSuccess(updatedUser);
-                    setLoading(false);
-                    onClose();
-                }, 1000);
+                // Sucesso na edição
+                onSuccess(updatedUser);
+                setLoading(false);
+                setShowConfirmation(true);
 
             } else {
                 // ========================== CRIAR NOVO USUÁRIO ==========================
@@ -145,10 +148,13 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                     options: {
                         data: {
                             name: name,
+                            gender: gender,
                             role // TitleCase: 'Admin', 'Staff', 'Patient'
                         }
                     }
                 });
+
+                console.log('SignUp Admin Result:', { authData, authError });
 
                 if (authError) {
                     // Traduzir erros comuns do Supabase
@@ -163,40 +169,56 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
 
                 if (authData.user) {
                     const newUserId = authData.user.id;
+                    const identities = authData.user.identities;
 
-                    // 2. Garantir criação do Profile
-                    // (O trigger do banco deve fazer isso, mas fazemos manual para garantir dados completos)
-                    const { error: profileError } = await supabase
+                    // Se identity for vazio array, usuário já existe mas por segurança o Supabase não diz erro explícito (em algumas configs)
+                    if (identities && identities.length === 0) {
+                        throw new Error('Este e-mail já está registrado (mas sem confirmação ou bloqueado). Tente outro.');
+                    }
+
+                    // 2. Garantir criação do Profile USANDO O MESMO CLIENTE TEMPORÁRIO (Self-Registration)
+                    // Isso evita restrições de RLS do Admin criando para outros.
+                    console.log('Tentando criar profile para:', newUserId);
+                    const { error: profileError } = await tempSupabase
                         .from('profiles')
-                        .upsert({ // Upsert previne erro se o trigger já tiver criado
+                        .upsert({
                             id: newUserId,
                             email: email,
                             name: name,
-                            role, // TitleCase: 'Admin', 'Staff', 'Patient'
+                            gender: gender,
+                            role,
                             created_at: new Date().toISOString()
                         });
 
                     if (profileError) {
                         console.error("Erro ao salvar profile:", profileError);
-                        // Não lançamos erro fatal aqui porque o usuário Auth foi criado
+                        // Tentar detalhar erro RLS
+                        if (profileError.code === '42501') {
+                            throw new Error('Erro de permissão (RLS). O Admin não conseguiu criar o perfil.');
+                        }
                     }
 
-                    setSuccessMsg(`Usuário ${name} criado com sucesso!`);
+                    // Não define successMsg, vai para Confirmation View
+                    setCreatedUserCredentials({ email, password });
 
                     const newUser = {
                         id: newUserId,
                         name,
+                        gender,
                         email,
                         role,
                         status: 'Active',
                         initials: name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
                     };
 
-                    setTimeout(() => {
-                        onSuccess(newUser);
-                        setLoading(false);
-                        onClose();
-                    }, 1000);
+                    // SUCESSO!
+                    onSuccess(newUser); // Atualiza lista no pai
+                    setLoading(false);
+                    setShowConfirmation(true); // Exibe modal de confirmação
+                } else {
+                    // Caso estranho onde não retorna erro mas também não retorna user
+                    console.warn('SignUp não retornou usuário:', authData);
+                    throw new Error('Não foi possível criar o usuário. Verifique se o e-mail já existe.');
                 }
             }
 
@@ -225,148 +247,195 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-6 space-y-5">
-
-                    {/* NOME */}
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Nome Completo</label>
-                        <input
-                            type="text"
-                            required
-                            value={name}
-                            onChange={e => setName(e.target.value)}
-                            className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-slate-900 dark:text-white transition-all placeholder:text-slate-400"
-                            placeholder="Ex: Dra. Marcela"
-                        />
-                    </div>
-
-                    {/* EMAIL */}
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">E-mail (Login)</label>
-                        <input
-                            type="email"
-                            required
-                            disabled={!!userToEdit} // Não permite trocar email na edição para evitar conflito de Auth
-                            value={email}
-                            onChange={e => setEmail(e.target.value)}
-                            className={`w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 outline-none text-slate-900 dark:text-white transition-all ${userToEdit ? 'opacity-60 cursor-not-allowed' : 'focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500'}`}
-                            placeholder="email@clinica.com"
-                        />
-                    </div>
-
-                    {/* SENHA (MODO NOVO) */}
-                    {!userToEdit && (
-                        <div>
-                            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Senha de Acesso</label>
-                            <input
-                                type="password"
-                                required
-                                minLength={6}
-                                value={password}
-                                onChange={e => setPassword(e.target.value)}
-                                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-slate-900 dark:text-white transition-all"
-                                placeholder="••••••••"
-                            />
-                            <p className="text-xs text-slate-400 mt-1 ml-1">Mínimo de 6 caracteres.</p>
+                {showConfirmation ? (
+                    <div className="p-8 flex flex-col items-center text-center animate-in zoom-in-95 duration-300">
+                        <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-6">
+                            <span className="material-symbols-outlined text-5xl text-green-600 dark:text-green-400">check_circle</span>
                         </div>
-                    )}
 
-                    {/* SENHA (MODO EDIÇÃO - APENAS PRÓPRIO USUÁRIO) */}
-                    {userToEdit && isSelfEdit && (
-                        <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
-                            {!isChangingPassword ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setIsChangingPassword(true)}
-                                    className="text-sm font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 mt-2"
-                                >
-                                    <span className="material-symbols-outlined text-base">lock_reset</span>
-                                    Alterar minha senha
-                                </button>
-                            ) : (
-                                <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 mt-2 animate-in slide-in-from-top-2">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">Alterar Senha</h4>
-                                        <button type="button" onClick={() => setIsChangingPassword(false)} className="text-xs text-slate-400 hover:text-slate-600">Cancelar</button>
-                                    </div>
-                                    <input
-                                        type="password"
-                                        placeholder="Nova Senha"
-                                        value={newPassword}
-                                        onChange={e => setNewPassword(e.target.value)}
-                                        className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-none focus:border-blue-500"
-                                    />
-                                    <input
-                                        type="password"
-                                        placeholder="Confirmar Nova Senha"
-                                        value={confirmNewPassword}
-                                        onChange={e => setConfirmNewPassword(e.target.value)}
-                                        className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-none focus:border-blue-500"
-                                    />
+                        <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
+                            {userToEdit ? 'Dados Atualizados!' : 'Usuário Criado!'}
+                        </h3>
+                        <p className="text-slate-500 mb-8 max-w-xs mx-auto">
+                            {userToEdit
+                                ? `Os dados de ${name} foram atualizados com sucesso.`
+                                : `O usuário ${name} agora faz parte do sistema.`
+                            }
+                        </p>
+
+                        {!userToEdit && createdUserCredentials && (
+                            <div className="w-full bg-slate-50 dark:bg-slate-900/50 rounded-xl p-5 mb-8 border border-slate-200 dark:border-slate-700">
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 border-b border-slate-200 dark:border-slate-700 pb-2">Credenciais de Acesso</p>
+
+                                <div className="flex items-center justify-between mb-3">
+                                    <span className="text-sm text-slate-500">Login</span>
+                                    <span className="font-mono text-sm font-bold text-slate-800 dark:text-slate-200">{createdUserCredentials.email}</span>
                                 </div>
-                            )}
-                        </div>
-                    )}
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm text-slate-500">Senha</span>
+                                    <span className="font-mono text-sm font-bold text-slate-800 dark:text-slate-200">{createdUserCredentials.password}</span>
+                                </div>
+                            </div>
+                        )}
 
-                    {/* PERFIL DE ACESSO */}
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
-                            Perfil de Acesso
-                            {readOnlyRole && <span className="ml-2 text-[10px] font-normal text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">Restrito</span>}
-                        </label>
-                        <select
-                            value={role}
-                            onChange={e => !readOnlyRole && setRole(e.target.value as UserRole)}
-                            disabled={readOnlyRole}
-                            className={`w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 outline-none text-slate-900 dark:text-white transition-all appearance-none ${readOnlyRole ? 'opacity-60 cursor-not-allowed' : 'focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500'}`}
-                        >
-                            <option value="Staff">Equipe (Staff)</option>
-                            <option value="Admin">Administrador</option>
-                            <option value="Patient">Paciente</option>
-                        </select>
-                    </div>
-
-                    {/* MENSAGENS DE ERRO/SUCESSO */}
-                    {error && (
-                        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/30 text-red-600 dark:text-red-400 text-sm rounded-xl flex items-start gap-2 animate-in slide-in-from-bottom-2">
-                            <span className="material-symbols-outlined text-lg mt-0.5">error</span>
-                            <span>{error}</span>
-                        </div>
-                    )}
-                    {successMsg && (
-                        <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800/30 text-green-600 dark:text-green-400 text-sm rounded-xl flex items-center gap-2 animate-in slide-in-from-bottom-2">
-                            <span className="material-symbols-outlined text-lg">check_circle</span>
-                            {successMsg}
-                        </div>
-                    )}
-
-                    {/* BOTÕES */}
-                    <div className="flex gap-3 pt-4">
                         <button
-                            type="button"
                             onClick={onClose}
-                            className="flex-1 px-4 py-3.5 rounded-xl border border-slate-200 dark:border-slate-600 font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                            className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold py-4 rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2 shadow-xl"
                         >
-                            Cancelar
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="flex-1 bg-blue-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-600/20 hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
-                        >
-                            {loading ? (
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                            ) : (
-                                <>
-                                    <span className="material-symbols-outlined text-[20px]">
-                                        {userToEdit ? 'save' : 'person_add'}
-                                    </span>
-                                    {userToEdit ? 'Salvar' : 'Criar Usuário'}
-                                </>
-                            )}
+                            Concluir
                         </button>
                     </div>
-                </form>
+                ) : (
+                    <form onSubmit={handleSubmit} className="p-6 space-y-5">
+
+                        {/* GÊNERO E NOME (GRID) */}
+                        <div className="grid grid-cols-3 gap-4">
+                            <div className="col-span-1">
+                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Gênero</label>
+                                <select
+                                    value={gender}
+                                    onChange={e => setGender(e.target.value as 'Male' | 'Female')}
+                                    className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 outline-none text-slate-900 dark:text-white transition-all appearance-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                >
+                                    <option value="Female">Feminino</option>
+                                    <option value="Male">Masculino</option>
+                                </select>
+                            </div>
+                            <div className="col-span-2">
+                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Nome Completo</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={name}
+                                    onChange={e => setName(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-slate-900 dark:text-white transition-all placeholder:text-slate-400"
+                                    placeholder={gender === 'Male' ? "Ex: Dr. João Silva" : "Ex: Dra. Marcela Widmer"}
+                                />
+                            </div>
+                        </div>
+
+                        {/* EMAIL */}
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">E-mail (Login)</label>
+                            <input
+                                type="email"
+                                required
+                                disabled={!!userToEdit} // Não permite trocar email na edição para evitar conflito de Auth
+                                value={email}
+                                onChange={e => setEmail(e.target.value)}
+                                className={`w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 outline-none text-slate-900 dark:text-white transition-all ${userToEdit ? 'opacity-60 cursor-not-allowed' : 'focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500'}`}
+                                placeholder="email@clinica.com"
+                            />
+                        </div>
+
+                        {/* SENHA (MODO NOVO) */}
+                        {!userToEdit && (
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Senha de Acesso</label>
+                                <input
+                                    type="password"
+                                    required
+                                    minLength={6}
+                                    value={password}
+                                    onChange={e => setPassword(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-slate-900 dark:text-white transition-all"
+                                    placeholder="••••••••"
+                                />
+                                <p className="text-xs text-slate-400 mt-1 ml-1">Mínimo de 6 caracteres.</p>
+                            </div>
+                        )}
+
+                        {/* SENHA (MODO EDIÇÃO - APENAS PRÓPRIO USUÁRIO) */}
+                        {userToEdit && isSelfEdit && (
+                            <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+                                {!isChangingPassword ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsChangingPassword(true)}
+                                        className="text-sm font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 mt-2"
+                                    >
+                                        <span className="material-symbols-outlined text-base">lock_reset</span>
+                                        Alterar minha senha
+                                    </button>
+                                ) : (
+                                    <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 mt-2 animate-in slide-in-from-top-2">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">Alterar Senha</h4>
+                                            <button type="button" onClick={() => setIsChangingPassword(false)} className="text-xs text-slate-400 hover:text-slate-600">Cancelar</button>
+                                        </div>
+                                        <input
+                                            type="password"
+                                            placeholder="Nova Senha"
+                                            value={newPassword}
+                                            onChange={e => setNewPassword(e.target.value)}
+                                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-none focus:border-blue-500"
+                                        />
+                                        <input
+                                            type="password"
+                                            placeholder="Confirmar Nova Senha"
+                                            value={confirmNewPassword}
+                                            onChange={e => setConfirmNewPassword(e.target.value)}
+                                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-none focus:border-blue-500"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* PERFIL DE ACESSO */}
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                                Perfil de Acesso
+                                {readOnlyRole && <span className="ml-2 text-[10px] font-normal text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">Restrito</span>}
+                            </label>
+                            <select
+                                value={role}
+                                onChange={e => !readOnlyRole && setRole(e.target.value as UserRole)}
+                                disabled={readOnlyRole}
+                                className={`w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 outline-none text-slate-900 dark:text-white transition-all appearance-none ${readOnlyRole ? 'opacity-60 cursor-not-allowed' : 'focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500'}`}
+                            >
+                                <option value="Staff">Equipe (Staff)</option>
+                                <option value="Admin">Administrador</option>
+                                <option value="Patient">Paciente</option>
+                            </select>
+                        </div>
+
+                        {/* MENSAGENS DE ERRO */}
+                        {error && (
+                            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/30 text-red-600 dark:text-red-400 text-sm rounded-xl flex items-start gap-2 animate-in slide-in-from-bottom-2">
+                                <span className="material-symbols-outlined text-lg mt-0.5">error</span>
+                                <span>{error}</span>
+                            </div>
+                        )}
+
+                        {/* BOTÕES */}
+                        <div className="flex gap-3 pt-4">
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                className="flex-1 px-4 py-3.5 rounded-xl border border-slate-200 dark:border-slate-600 font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="flex-1 bg-blue-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-600/20 hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+                            >
+                                {loading ? (
+                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                ) : (
+                                    <>
+                                        <span className="material-symbols-outlined text-[20px]">
+                                            {userToEdit ? 'save' : 'person_add'}
+                                        </span>
+                                        {userToEdit ? 'Salvar' : 'Criar Usuário'}
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </form>
+                )}
             </div>
         </div>
     );
