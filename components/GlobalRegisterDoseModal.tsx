@@ -50,7 +50,6 @@ const GlobalRegisterDoseModal: React.FC<GlobalRegisterDoseModalProps> = ({
     // Load ALL patients when modal opens
     useEffect(() => {
         if (!isOpen) {
-            // Reset state when modal closes
             setAllPatients([]);
             setPatients([]);
             setSearchQuery('');
@@ -58,37 +57,43 @@ const GlobalRegisterDoseModal: React.FC<GlobalRegisterDoseModalProps> = ({
             return;
         }
 
-        // If we already have a patient pre-selected (from PatientProfilePage), skip loading
+        // If we already have a patient pre-selected, we might still want to fetch others for search?
+        // But the user logic was: if initialPatient exists, skip loading.
+        // Let's Respect the user logic but fix the loop.
         if (initialPatient) {
-            console.log('[DEBUG] Patient already selected:', initialPatient.name);
             return;
         }
 
-        // Fetch all patients for the autocomplete
+        let isMounted = true;
+
         const fetchAllPatients = async () => {
             console.log('[DEBUG] Fetching all patients...');
             try {
+                // Not using global loading state to avoid blocking the whole modal, just the dropdown
                 const { data, error } = await supabase
                     .from('patients')
                     .select('id, name, avatar_url, initials, current_weight')
                     .order('name');
 
-                if (error) {
-                    console.error('[DEBUG] Error fetching patients:', error);
-                    return;
-                }
+                if (error) throw error;
 
-                console.log('[DEBUG] Loaded patients:', data?.length || 0);
-                setAllPatients(data || []);
-                setPatients((data || []).slice(0, 8));
-                setShowResults(true); // Show dropdown automatically
+                if (isMounted) {
+                    console.log('[DEBUG] Loaded patients:', data?.length || 0);
+                    setAllPatients(data || []);
+                    setPatients((data || []).slice(0, 8));
+                    setShowResults(true);
+                }
             } catch (err) {
                 console.error('[DEBUG] Fetch error:', err);
+            } finally {
+                // Ensure UI knows we finished if we had a specific loading state
             }
         };
 
         fetchAllPatients();
-    }, [isOpen, initialPatient]);
+
+        return () => { isMounted = false; };
+    }, [isOpen]); // Removed Can't rely on initialPatient reference stability
 
     // Filter patients locally based on search query
     useEffect(() => {

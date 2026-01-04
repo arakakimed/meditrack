@@ -230,15 +230,18 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
     const cardRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
 
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true);
         try {
             const { data: tagsData } = await supabase.from('clinic_tags').select('*');
-            if (tagsData) setAllClinicTags(tagsData);
+            if (isMounted.current && tagsData) setAllClinicTags(tagsData);
 
             // Buscar TODOS os pacientes (aprovados e pendentes)
-            const { data: pData } = await supabase.from('patients').select('*').order('name');
-            if (pData) {
+            const { data: pData, error } = await supabase.from('patients').select('*').order('name');
+
+            if (error) throw error;
+
+            if (isMounted.current && pData) {
                 // Separar aprovados e pendentes
                 const approved = pData.filter(p => p.access_granted === true || p.status === 'approved');
                 const pending = pData.filter(p => p.access_granted === false && p.status === 'pending');
@@ -263,12 +266,18 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
             }
         } catch (error) {
             console.error('Erro ao buscar dados:', error);
+            // Optionally set error state here if UI handles it
         } finally {
-            setLoading(false);
+            if (isMounted.current) setLoading(false);
         }
-    };
+    }, []);
 
-    useEffect(() => { fetchData(); }, []);
+    const isMounted = useRef(true);
+    useEffect(() => {
+        isMounted.current = true;
+        fetchData();
+        return () => { isMounted.current = false; };
+    }, [fetchData]);
 
     // ========== FUNÇÕES DE APROVAÇÃO/REJEIÇÃO ==========
 
@@ -649,8 +658,20 @@ const PatientsPage: React.FC<PatientsPageProps> = ({
         }
     };
 
+    // ========== RENDERIZAÇÃO ==========
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="flex flex-col items-center gap-3">
+                    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-slate-500 font-medium animate-pulse">Carregando pacientes...</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6 pb-24">
+        <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6 pb-24 animate-in fade-in duration-300">
             <div className="flex justify-between items-end">
                 <div>
                     <div className="flex items-center gap-3">

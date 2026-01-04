@@ -50,7 +50,10 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
     }, [selectedIndex]);
 
     const dataPoints = useMemo(() => {
-        return [...weightHistory].sort((a, b) => a.date.getTime() - b.date.getTime());
+        if (!weightHistory || !Array.isArray(weightHistory)) return [];
+        return [...weightHistory]
+            .filter(p => p && p.date && !isNaN(p.date.getTime()) && p.weight !== null && !isNaN(p.weight)) // Filter invalid data
+            .sort((a, b) => a.date.getTime() - b.date.getTime());
     }, [weightHistory]);
 
     const width = isMobile ? 350 : 800;
@@ -59,14 +62,30 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
         ? { top: 40, right: 20, bottom: 30, left: 35 }
         : { top: 50, right: 40, bottom: 30, left: 40 };
 
-    const safeWeights = dataPoints.length > 0 ? dataPoints.map(p => p.weight) : [0];
-    const minWeight = Math.min(...safeWeights, patient.targetWeight || 999) - 2;
-    const maxWeight = Math.max(...safeWeights, patient.initialWeight || 0) + 2;
-    const weightRange = maxWeight - minWeight || 10;
+    // Safety checks for min/max calculations to prevent NaN
+    const safeWeights = dataPoints.map(p => p.weight).filter(w => !isNaN(w));
+    const defaultWeight = patient.initialWeight || 70;
+
+    // Ensure we have finite numbers
+    let minWeight = safeWeights.length > 0 ? Math.min(...safeWeights) : defaultWeight;
+    let maxWeight = safeWeights.length > 0 ? Math.max(...safeWeights) : defaultWeight;
+
+    // Add padding and validate against target/initial
+    if (patient.targetWeight && !isNaN(patient.targetWeight)) minWeight = Math.min(minWeight, patient.targetWeight);
+    if (patient.initialWeight && !isNaN(patient.initialWeight)) maxWeight = Math.max(maxWeight, patient.initialWeight);
+
+    minWeight = minWeight - 2;
+    maxWeight = maxWeight + 2;
+
+    const weightRange = (maxWeight - minWeight) || 10;
+
+    // Ensure range is never 0 or NaN
+    const validWeightRange = (!isNaN(weightRange) && weightRange > 0) ? weightRange : 10;
+    const validMinWeight = !isNaN(minWeight) ? minWeight : 0;
 
     const minDate = dataPoints.length > 0 ? dataPoints[0].date.getTime() : new Date().getTime();
     const maxDate = dataPoints.length > 0 ? dataPoints[dataPoints.length - 1].date.getTime() : new Date().getTime();
-    const dateRange = maxDate - minDate || 1;
+    const dateRange = (maxDate - minDate) || 1;
 
     const getX = React.useCallback((date: Date) => {
         const percent = (date.getTime() - minDate) / dateRange;
@@ -74,9 +93,13 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
     }, [minDate, dateRange, width, padding]);
 
     const getY = React.useCallback((weight: number) => {
-        const percent = (weight - minWeight) / weightRange;
-        return height - padding.bottom - percent * (height - padding.top - padding.bottom);
-    }, [minWeight, weightRange, height, padding]);
+        // Double safety for NaN
+        if (isNaN(weight) || isNaN(validMinWeight) || isNaN(validWeightRange)) return height - padding.bottom;
+
+        const percent = (weight - validMinWeight) / validWeightRange;
+        const val = height - padding.bottom - percent * (height - padding.top - padding.bottom);
+        return isNaN(val) ? 0 : val;
+    }, [validMinWeight, validWeightRange, height, padding]);
 
     const linePath = dataPoints.reduce((path, point, i) => {
         const x = getX(point.date);
@@ -169,10 +192,18 @@ const WeightEvolutionChart: React.FC<WeightEvolutionChartProps> = ({ patient, we
             const y = p.weight;
             sumX += x; sumY += y; sumXY += (x * y); sumXX += (x * x);
         });
-        const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+
+        const denominator = (n * sumXX - sumX * sumX);
+        if (denominator === 0) return null; // Avoid division by zero (e.g., all points on same date)
+
+        const slope = (n * sumXY - sumX * sumY) / denominator;
         const intercept = (sumY - slope * sumX) / n;
         const startY = slope * minDate + intercept;
         const endY = slope * maxDate + intercept;
+
+        // Ensure coordinates are finite
+        if (!isFinite(startY) || !isFinite(endY)) return null;
+
         return { x1: getX(new Date(minDate)), y1: getY(startY), x2: getX(new Date(maxDate)), y2: getY(endY) };
     }, [dataPoints, minDate, maxDate, getX, getY]);
 

@@ -86,7 +86,21 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
         }
     };
 
+    const [userName, setUserName] = useState('');
+
     useEffect(() => { fetchDashboardData(); }, []);
+
+    // Fetch User Name
+    useEffect(() => {
+        const getUserName = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const name = user.user_metadata?.name || user.user_metadata?.full_name || 'Doutor(a)';
+                setUserName(name);
+            }
+        };
+        getUserName();
+    }, []);
 
     const getTagInfo = (tagId: string) => {
         const tagInfo = allClinicTags.find(t => t.id === tagId);
@@ -109,7 +123,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
             {/* Header - AJUSTE O NOME AQUI */}
             <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Olá, Dr. Renan Arakaki</h1>
+                    <h1 className="text-2xl font-bold text-slate-900">Olá, {userName || 'Dr. Renan Arakaki'}</h1>
                     <p className="text-slate-500 text-sm capitalize">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
                 </div>
                 <div className="relative">

@@ -275,13 +275,19 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
     const [editingStep, setEditingStep] = useState<any | null>(null); // Simplified type for internal use
     const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
 
+    const isMounted = React.useRef(true);
+    useEffect(() => {
+        isMounted.current = true;
+        return () => { isMounted.current = false; };
+    }, []);
+
     useEffect(() => {
         // PERFORMANCE: Batch fetching
         const loadData = async () => {
-            setLoading(true);
+            if (isMounted.current) setLoading(true);
             await fetchTags();
-            await fetchEvents();
-            setLoading(false);
+            if (isMounted.current) await fetchEvents();
+            if (isMounted.current) setLoading(false);
         };
         loadData();
     }, [currentDate]);
@@ -317,105 +323,137 @@ const SchedulePage: React.FC<{ onViewPatient: (patientId: string) => void }> = (
             .from('patients')
             .select('id, name, avatar_url, tags');
 
-        if (patientsError || !patients) {
+        if (patientsError) {
             console.error('Error fetching patients:', patientsError);
+            setLoading(false);
+            return;
+        }
+
+        if (!patients || patients.length === 0) {
+            setEvents([]);
+            setLoading(false);
             return;
         }
 
         const allEvents: CalendarEvent[] = [];
 
-        // PERFORMANCE: Parallelize requests instead of serial loop
+        // Distribuir requisições em paralelo com segurança
         const promises = patients.map(async (patient) => {
+            if (!patient) return []; // Safety check
+
             const patientEvents: CalendarEvent[] = [];
 
-            // Fetch injections with date filter
-            const { data: injections } = await supabase
-                .from('injections')
-                .select('id, applied_at, created_at, dosage, status')
-                .eq('patient_id', patient.id)
-                .gte('applied_at', fetchStartDate.toISOString().split('T')[0])
-                .lte('applied_at', fetchEndDate.toISOString().split('T')[0]);
+            try {
+                // Fetch injections
+                const { data: injections } = await supabase
+                    .from('injections')
+                    .select('id, applied_at, created_at, dosage, status')
+                    .eq('patient_id', patient.id)
+                    .gte('applied_at', fetchStartDate.toISOString().split('T')[0])
+                    .lte('applied_at', fetchEndDate.toISOString().split('T')[0]);
 
-            if (injections) {
-                injections.forEach(inj => {
-                    const initials = patient.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
-                    const dateSource = inj.applied_at || inj.created_at;
+                if (injections) {
+                    injections.forEach(inj => {
+                        const dateSource = inj.applied_at || inj.created_at;
+                        // Skip invalid dates
+                        if (!dateSource) return;
 
-                    let eventDate: Date;
-                    if (typeof dateSource === 'string') {
-                        const datePart = dateSource.split('T')[0];
-                        const [year, month, day] = datePart.split('-').map(Number);
-                        eventDate = new Date(year, month - 1, day, 12, 0, 0);
-                    } else {
-                        eventDate = new Date(dateSource);
-                    }
+                        let eventDate: Date;
+                        try {
+                            if (typeof dateSource === 'string') {
+                                const datePart = dateSource.split('T')[0];
+                                const [year, month, day] = datePart.split('-').map(Number);
+                                eventDate = new Date(year, month - 1, day, 12, 0, 0);
+                            } else {
+                                eventDate = new Date(dateSource);
+                            }
 
-                    patientEvents.push({
-                        id: inj.id,
-                        date: eventDate,
-                        patientId: patient.id,
-                        patientName: patient.name,
-                        patientInitials: initials,
-                        patientAvatar: patient.avatar_url,
-                        patientTags: patient.tags,
-                        type: 'injection',
-                        status: inj.status || 'Scheduled',
-                        dosage: inj.dosage ? `${inj.dosage} mg` : undefined
+                            // Check valid date
+                            if (isNaN(eventDate.getTime())) return;
+
+                            patientEvents.push({
+                                id: inj.id,
+                                date: eventDate,
+                                patientId: patient.id,
+                                patientName: patient.name || 'Paciente',
+                                patientInitials: patient.name ? patient.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : '?',
+                                patientAvatar: patient.avatar_url,
+                                patientTags: patient.tags || [],
+                                type: 'injection',
+                                status: inj.status || 'Scheduled',
+                                dosage: inj.dosage ? `${inj.dosage} mg` : undefined
+                            });
+                        } catch (e) {
+                            // Ignore malformed date
+                        }
                     });
-                });
-            }
+                }
 
-            // Fetch medication steps with date filter
-            const { data: steps } = await supabase
-                .from('medication_steps')
-                .select('id, patient_id, date, dosage, status, details, progress, current_week, total_weeks, is_skipped, order_index')
-                .eq('patient_id', patient.id)
-                .gte('date', fetchStartDate.toISOString().split('T')[0])
-                .lte('date', fetchEndDate.toISOString().split('T')[0]);
+                // Fetch medication steps
+                const { data: steps } = await supabase
+                    .from('medication_steps')
+                    .select('id, patient_id, date, dosage, status, details, progress, current_week, total_weeks, is_skipped, order_index')
+                    .eq('patient_id', patient.id)
+                    .gte('date', fetchStartDate.toISOString().split('T')[0])
+                    .lte('date', fetchEndDate.toISOString().split('T')[0]);
 
-            if (steps) {
-                steps.forEach(step => {
-                    const initials = patient.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+                if (steps) {
+                    steps.forEach(step => {
+                        if (!step.date) return;
 
-                    let stepDate: Date;
-                    if (typeof step.date === 'string') {
-                        const datePart = step.date.split('T')[0];
-                        const [year, month, day] = datePart.split('-').map(Number);
-                        stepDate = new Date(year, month - 1, day, 12, 0, 0);
-                    } else {
-                        stepDate = new Date(step.date);
-                    }
+                        let stepDate: Date;
+                        try {
+                            if (typeof step.date === 'string') {
+                                const datePart = step.date.split('T')[0];
+                                const [year, month, day] = datePart.split('-').map(Number);
+                                stepDate = new Date(year, month - 1, day, 12, 0, 0);
+                            } else {
+                                stepDate = new Date(step.date);
+                            }
 
-                    const isCancelled = step.is_skipped === true || step.status === 'Cancelado';
-                    const displayStatus = isCancelled ? 'Cancelado' : (step.status || 'Scheduled');
+                            if (isNaN(stepDate.getTime())) return;
 
-                    patientEvents.push({
-                        id: step.id,
-                        date: stepDate,
-                        patientId: patient.id,
-                        patientName: patient.name,
-                        patientInitials: initials,
-                        patientAvatar: patient.avatar_url,
-                        patientTags: patient.tags,
-                        type: 'forecast',
-                        status: displayStatus as any,
-                        dosage: step.dosage ? `${step.dosage} mg` : undefined,
-                        isCancelled: isCancelled,
-                        journeyStatus: step.status,
-                        details: step.details,
-                        progress: step.progress,
-                        current_week: step.current_week,
-                        total_weeks: step.total_weeks,
-                        is_skipped: step.is_skipped,
-                        order_index: step.order_index
+                            const isCancelled = step.is_skipped === true || step.status === 'Cancelado';
+                            const displayStatus = isCancelled ? 'Cancelado' : (step.status || 'Scheduled');
+
+                            patientEvents.push({
+                                id: step.id,
+                                date: stepDate,
+                                patientId: patient.id,
+                                patientName: patient.name || 'Paciente',
+                                patientInitials: patient.name ? patient.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : '?',
+                                patientAvatar: patient.avatar_url,
+                                patientTags: patient.tags || [],
+                                type: 'forecast',
+                                status: displayStatus as any,
+                                dosage: step.dosage ? `${step.dosage} mg` : undefined,
+                                isCancelled: isCancelled,
+                                journeyStatus: step.status,
+                                details: step.details,
+                                progress: step.progress,
+                                current_week: step.current_week,
+                                total_weeks: step.total_weeks,
+                                is_skipped: step.is_skipped,
+                                order_index: step.order_index
+                            });
+                        } catch (e) {
+                            // Ignore faulty step
+                        }
                     });
-                });
+                }
+            } catch (err) {
+                console.error(`Error processing events for patient ${patient.id}:`, err);
             }
             return patientEvents;
         });
 
         const results = await Promise.all(promises);
-        results.forEach(pEvents => allEvents.push(...pEvents));
+        // Flatten with safety
+        results.forEach(pEvents => {
+            if (Array.isArray(pEvents)) {
+                allEvents.push(...pEvents);
+            }
+        });
 
         setEvents(allEvents);
     };
