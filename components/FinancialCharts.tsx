@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 
 // --- Types ---
 interface ChartDataPoint {
@@ -58,80 +58,139 @@ const getSmoothPath = (points: number[][]) => {
 
 export const FinancialLineChart: React.FC<LineChartProps> = ({
     data,
-    color = '#10B981', // Emerald 500
+    color = '#3B82F6',
     height = 250,
     gradientId = 'revenueGradient'
 }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [width, setWidth] = useState(0);
+    const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
+    useEffect(() => {
+        if (!containerRef.current) return;
+        const resizeObserver = new ResizeObserver(entries => {
+            if (entries[0]) {
+                setWidth(entries[0].contentRect.width);
+            }
+        });
+        resizeObserver.observe(containerRef.current);
+        return () => resizeObserver.disconnect();
+    }, []);
+
     const padding = { top: 20, right: 30, bottom: 30, left: 40 };
-    const width = 1000;
+
+    // Only render chart if we have width
+    const pointsArr = useMemo(() => {
+        if (!width) return [];
+        const maxValue = Math.max(...data.map(d => d.value)) * 1.1 || 100;
+        const getX = (index: number) => {
+            const step = (width - padding.left - padding.right) / (data.length - 1 || 1);
+            return padding.left + (index * step);
+        };
+        const getY = (value: number) => {
+            const workableHeight = height - padding.top - padding.bottom;
+            const percent = value / maxValue;
+            return height - padding.bottom - (percent * workableHeight);
+        };
+        return data.map((d, i) => ({
+            x: getX(i),
+            y: getY(d.value),
+            value: d.value,
+            label: d.label
+        }));
+    }, [data, width, height]);
+
+    const pathD = useMemo(() => {
+        if (pointsArr.length === 0) return '';
+        return getSmoothPath(pointsArr.map(p => [p.x, p.y]));
+    }, [pointsArr]);
+
+    const areaPathD = useMemo(() => {
+        if (!pathD || pointsArr.length === 0) return '';
+        return `
+            ${pathD} 
+            L ${pointsArr[pointsArr.length - 1].x},${height - padding.bottom} 
+            L ${pointsArr[0].x},${height - padding.bottom} 
+            Z
+        `;
+    }, [pathD, pointsArr, height]);
 
     const maxValue = Math.max(...data.map(d => d.value)) * 1.1 || 100;
 
-    const getX = (index: number) => {
-        const step = (width - padding.left - padding.right) / (data.length - 1 || 1);
-        return padding.left + (index * step);
-    };
-
-    const getY = (value: number) => {
-        const workableHeight = height - padding.top - padding.bottom;
-        const percent = value / maxValue;
-        return height - padding.bottom - (percent * workableHeight);
-    };
-
-    const pointsArr = data.map((d, i) => [getX(i), getY(d.value)]);
-    const pathD = getSmoothPath(pointsArr);
-
-    // Closed path for area
-    const areaPathD = `
-        ${pathD} 
-        L ${getX(data.length - 1)},${height - padding.bottom} 
-        L ${getX(0)},${height - padding.bottom} 
-        Z
-    `;
-
     return (
-        <div className="w-full h-full min-h-[250px]">
-            <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="w-full h-full overflow-visible">
-                <defs>
-                    <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={color} stopOpacity="0.2" />
-                        <stop offset="100%" stopColor={color} stopOpacity="0" />
-                    </linearGradient>
-                </defs>
+        <div ref={containerRef} className="w-full h-full min-h-[250px] relative group select-none">
+            {width > 0 && (
+                <svg width={width} height={height} className="overflow-visible">
+                    <defs>
+                        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+                            <stop offset="100%" stopColor={color} stopOpacity="0" />
+                        </linearGradient>
+                        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                            <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor={color} floodOpacity="0.3" />
+                        </filter>
+                    </defs>
 
-                {/* Grid */}
-                {[0, 0.25, 0.5, 0.75, 1].map(t => {
-                    const y = getY(maxValue * t);
-                    return (
-                        <g key={t}>
-                            <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="#E2E8F0" strokeWidth="1" strokeDasharray="4 4" />
-                            <text x={padding.left - 10} y={y + 4} textAnchor="end" className="text-[10px] fill-slate-400 font-mono">{formatCurrencyShort(maxValue * t)}</text>
+                    {/* Grid Lines */}
+                    {[0, 0.25, 0.5, 0.75, 1].map(t => {
+                        const workableHeight = height - padding.top - padding.bottom;
+                        const y = height - padding.bottom - (t * workableHeight);
+                        return (
+                            <g key={t}>
+                                <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="#E2E8F0" strokeWidth="1" strokeDasharray="4 4" className="dark:stroke-slate-700" />
+                                <text x={padding.left - 10} y={y + 3} textAnchor="end" className="text-[10px] fill-slate-400 font-mono tracking-tighter">{formatCurrencyShort(maxValue * t)}</text>
+                            </g>
+                        );
+                    })}
+
+                    {/* Chart Area */}
+                    <path d={areaPathD} fill={`url(#${gradientId})`} className="transition-all duration-500" />
+
+                    {/* Chart Line */}
+                    <path d={pathD} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'url(#shadow)' }} className="transition-all duration-500" />
+
+                    {/* Interactive Points */}
+                    {pointsArr.map((p, i) => (
+                        <g
+                            key={i}
+                            onMouseEnter={() => setHoveredIndex(i)}
+                            onMouseLeave={() => setHoveredIndex(null)}
+                            className="cursor-pointer"
+                        >
+                            {/* Hit Area (invisible bigger circle) */}
+                            <circle cx={p.x} cy={p.y} r="15" fill="transparent" />
+
+                            {/* Visible Dot */}
+                            <circle
+                                cx={p.x}
+                                cy={p.y}
+                                r={hoveredIndex === i ? 6 : 4}
+                                fill="white"
+                                stroke={color}
+                                strokeWidth={hoveredIndex === i ? 3 : 2}
+                                className="transition-all duration-200 dark:fill-slate-800"
+                            />
+
+                            {/* Tooltip */}
+                            <g className={`transition-opacity duration-200 ${hoveredIndex === i ? 'opacity-100' : 'opacity-0'} pointer-events-none`}>
+                                <foreignObject x={p.x - 50} y={p.y - 60} width="100" height="50">
+                                    <div className="flex flex-col items-center justify-center">
+                                        <div className="bg-slate-900 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-xl whitespace-nowrap z-10">
+                                            R$ {p.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </div>
+                                        <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-slate-900 -mt-px"></div>
+                                    </div>
+                                </foreignObject>
+                            </g>
                         </g>
-                    );
-                })}
+                    ))}
 
-                {/* Area & Line */}
-                <path d={areaPathD} fill={`url(#${gradientId})`} />
-                <path d={pathD} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-
-                {/* Points */}
-                {data.map((d, i) => (
-                    <g key={i} className="group cursor-pointer">
-                        <circle cx={getX(i)} cy={getY(d.value)} r="4" fill="white" stroke={color} strokeWidth="2" className="transition-all duration-300 group-hover:r-6" />
-                        <g className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                            <rect x={getX(i) - 35} y={getY(d.value) - 45} width="70" height="30" rx="6" fill="#1E293B" />
-                            <text x={getX(i)} y={getY(d.value) - 26} textAnchor="middle" fill="white" className="text-[11px] font-bold">R$ {d.value}</text>
-                            {/* Little triangle arrow */}
-                            <path d={`M ${getX(i)} ${getY(d.value) - 15} L ${getX(i) - 5} ${getY(d.value) - 15} L ${getX(i)} ${getY(d.value) - 10} L ${getX(i) + 5} ${getY(d.value) - 15} Z`} fill="#1E293B" />
-                        </g>
-                    </g>
-                ))}
-
-                {/* X Axis */}
-                {data.map((d, i) => (
-                    <text key={i} x={getX(i)} y={height - 10} textAnchor="middle" className="text-[10px] md:text-xs fill-slate-500 font-medium">{d.label}</text>
-                ))}
-            </svg>
+                    {/* X Axis Labels */}
+                    {pointsArr.map((p, i) => (
+                        <text key={i} x={p.x} y={height - 5} textAnchor="middle" className="text-[10px] font-bold fill-slate-400 uppercase tracking-wide">{p.label}</text>
+                    ))}
+                </svg>
+            )}
         </div>
     );
 };

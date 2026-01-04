@@ -130,7 +130,6 @@ const AdminPanel: React.FC = () => {
                             <SidebarItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
                             <SidebarItem icon="medication" label="Medicações" active={currentView === 'medications'} onClick={() => { setAdminViewingPatient(null); setCurrentView('medications'); }} />
                             <SidebarItem icon="payments" label="Financeiro" active={currentView === 'financials'} onClick={() => { setAdminViewingPatient(null); setCurrentView('financials'); }} />
-                            <SidebarItem icon="manage_accounts" label="Usuários" active={currentView === 'users'} onClick={() => { setAdminViewingPatient(null); setCurrentView('users'); }} />
                             <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-700">
                                 <SidebarItem icon="settings" label="Configurações" active={currentView === 'settings'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} />
                             </div>

@@ -8,6 +8,8 @@ import EnableAccessModal from './EnableAccessModal';
 
 // --- Subcomponente: ProfileCard ---
 const ProfileCard: React.FC<{ profile: Profile, onEdit: (profile: Profile) => void }> = ({ profile, onEdit }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+
     const getRoleName = (role: string) => {
         switch (role) {
             case 'Admin': return 'Administrador';
@@ -18,21 +20,39 @@ const ProfileCard: React.FC<{ profile: Profile, onEdit: (profile: Profile) => vo
     };
 
     return (
-        <div className="bg-surface-light dark:bg-surface-dark p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col items-start gap-4 h-full transition-transform hover:scale-[1.02] duration-300">
-            <div className="p-3 rounded-full bg-primary/10 text-primary">
-                <span className="material-symbols-outlined text-2xl">{profile.icon}</span>
-            </div>
-            <div className="flex-1">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">{getRoleName(profile.role)}</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">{profile.description}</p>
-            </div>
-            <button
-                onClick={() => onEdit(profile)}
-                className="mt-4 text-sm font-bold text-primary hover:text-blue-700 transition-colors flex items-center gap-1"
+        <div className={`bg-surface-light dark:bg-surface-dark rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-all duration-300 overflow-hidden hover:shadow-md ${isExpanded ? 'h-auto' : 'h-fit'}`}>
+            <div
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="p-6 flex items-center gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors"
             >
-                Editar Permissões
-                <span className="material-symbols-outlined text-sm">arrow_forward</span>
-            </button>
+                <div className="p-3 rounded-full bg-primary/10 text-primary flex-shrink-0">
+                    <span className="material-symbols-outlined text-2xl">{profile.icon}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white truncate">{getRoleName(profile.role)}</h3>
+                    {!isExpanded && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">Clique para ver detalhes</p>
+                    )}
+                </div>
+                <span className={`material-symbols-outlined text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
+                    expand_more
+                </span>
+            </div>
+
+            <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isExpanded ? 'max-h-48 opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div className="px-6 pb-6 pt-0">
+                    <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
+                        {profile.description}
+                    </p>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onEdit(profile); }}
+                        className="text-sm font-bold text-primary hover:text-blue-700 transition-colors flex items-center gap-1 group"
+                    >
+                        Editar Permissões
+                        <span className="material-symbols-outlined text-sm group-hover:translate-x-1 transition-transform">arrow_forward</span>
+                    </button>
+                </div>
+            </div>
         </div>
     );
 };
@@ -421,7 +441,7 @@ const SettingsPage: React.FC = () => {
     };
 
     return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 md:pb-0">
+        <div className="p-6 md:p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 md:pb-0">
             {/* Profiles Section */}
             <section className="space-y-4">
                 <div>
