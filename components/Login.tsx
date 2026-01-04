@@ -77,10 +77,10 @@ const Login: React.FC = () => {
                 // Limpa o timeout pois deu tudo certo
                 clearTimeout(timeoutId);
 
-                // 3. Roteamento Inteligente
-                if (role === 'admin') navigate('/admin');
-                else if (role === 'staff') navigate('/staff');
-                else if (role === 'patient') navigate('/patient');
+                // 3. Roteamento Inteligente (TitleCase)
+                if (role === 'Admin') navigate('/admin');
+                else if (role === 'Staff') navigate('/staff');
+                else if (role === 'Patient') navigate('/patient');
                 else navigate('/unauthorized');
             }
         } catch (err: any) {

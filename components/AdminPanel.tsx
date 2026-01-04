@@ -25,8 +25,8 @@ const AdminPanel: React.FC = () => {
     const [isTagModalOpen, setIsTagModalOpen] = useState(false);
     const [patientToEdit, setPatientToEdit] = useState<Patient | undefined>(undefined);
 
-    // Verifica se é Admin
-    const isAdmin = role === 'admin';
+    // Verifica se é Admin (TitleCase)
+    const isAdmin = role === 'Admin';
 
     const handleAddPatient = () => {
         setPatientToEdit(undefined);
@@ -47,7 +47,7 @@ const AdminPanel: React.FC = () => {
                     onGoHome={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }}
                     readonly={false}
                     isAdmin={true} // Staff também é "admin" no sentido de poder editar prontuário
-                    showFinancials={role === 'admin'} // Financeiro restrito ao Admin principal
+                    showFinancials={role === 'Admin'} // Financeiro restrito ao Admin principal
                 />
             );
         }
@@ -143,7 +143,7 @@ const AdminPanel: React.FC = () => {
                 </nav>
                 <div className="p-4 border-t border-slate-200 dark:border-slate-700">
                     <div className="px-4 pb-2 text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                        {role === 'admin' ? 'Administrador' : 'Equipe Médica'}
+                        {role === 'Admin' ? 'Administrador' : 'Equipe Médica'}
                     </div>
                     <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-slate-600 hover:bg-slate-50 transition-colors">
                         <span className="material-symbols-outlined">logout</span>

@@ -231,14 +231,15 @@ const SettingsPage: React.FC = () => {
                 const { data: profilesData } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
                 if (profilesData) {
                     profilesData.forEach((p: any) => {
-                        // Normalizar Role (admin -> Admin)
+                        // Role já vem em TitleCase do banco ('Admin', 'Staff', 'Patient')
                         let roleNormalized: UserRole = 'Patient';
                         if (p.role) {
-                            const r = p.role.toLowerCase();
+                            // Normalização case-insensitive para compatibilidade
+                            const r = (p.role as string).toLowerCase();
                             if (r === 'admin') roleNormalized = 'Admin';
                             else if (r === 'staff') roleNormalized = 'Staff';
                             else if (r === 'patient') roleNormalized = 'Patient';
-                            else roleNormalized = p.role; // Fallback
+                            else roleNormalized = p.role as UserRole; // Fallback para valor direto
                         }
 
                         userMap.set(p.id, {

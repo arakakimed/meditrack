@@ -17,18 +17,18 @@ const App: React.FC = () => {
                     <Route path="/unauthorized" element={<Unauthorized />} />
 
                     {/* ROTA ADMIN (Só Admin entra) */}
-                    <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
+                    <Route element={<ProtectedRoute allowedRoles={['Admin']} />}>
                         <Route path="/admin/*" element={<AdminPanel />} />
                     </Route>
 
                     {/* ROTA STAFF (Staff e Admin entram) */}
                     {/* IMPORTANTE: Aqui carregamos o AdminPanel DIRETO, sem redirecionar para /admin */}
-                    <Route element={<ProtectedRoute allowedRoles={['staff', 'admin']} />}>
+                    <Route element={<ProtectedRoute allowedRoles={['Staff', 'Admin']} />}>
                         <Route path="/staff/*" element={<AdminPanel />} />
                     </Route>
 
                     {/* ROTA PACIENTE */}
-                    <Route element={<ProtectedRoute allowedRoles={['patient']} />}>
+                    <Route element={<ProtectedRoute allowedRoles={['Patient']} />}>
                         <Route path="/patient" element={<PatientPanel />} />
                     </Route>
 

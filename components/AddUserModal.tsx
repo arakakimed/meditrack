@@ -86,7 +86,7 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                     .from('profiles')
                     .update({
                         name,
-                        role: role.toLowerCase() // DATABASE: role lowercase (admin, staff)
+                        role // TitleCase: 'Admin', 'Staff', 'Patient'
                     })
                     .eq('id', userToEdit.id);
 
@@ -145,7 +145,7 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                     options: {
                         data: {
                             name: name,
-                            role: role.toLowerCase()
+                            role // TitleCase: 'Admin', 'Staff', 'Patient'
                         }
                     }
                 });
@@ -172,7 +172,7 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ isOpen, onClose, onSuccess,
                             id: newUserId,
                             email: email,
                             name: name,
-                            role: role.toLowerCase(),
+                            role, // TitleCase: 'Admin', 'Staff', 'Patient'
                             created_at: new Date().toISOString()
                         });
 

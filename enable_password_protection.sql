@@ -1,0 +1,57 @@
+-- ============================================================================
+-- FIX: Leaked Password Protection Disabled
+-- ============================================================================
+-- PROBLEMA: A proteção contra senhas vazadas (Leaked Password Protection)
+-- está desabilitada no Auth do Supabase. Isso permite que usuários criem
+-- contas com senhas comprometidas em vazamentos públicos.
+--
+-- SOLUÇÃO: Habilitar a proteção via Dashboard do Supabase
+--
+-- IMPORTANTE: Este recurso NÃO pode ser ativado via SQL direto.
+-- Você precisa habilitar manualmente no dashboard.
+-- ============================================================================
+
+-- ============================================================================
+-- INSTRUÇÕES PARA HABILITAR (MANUAL NO DASHBOARD)
+-- ============================================================================
+--
+-- 1. Acesse o Supabase Dashboard
+-- 2. Vá em: Authentication → Settings
+-- 3. Procure por "Password Protection" ou "Leaked Password Protection"
+-- 4. Ative a opção "Enable Leaked Password Protection"
+-- 5. Clique em "Save"
+--
+-- OU via API (se você tiver acesso ao Management API):
+--
+-- PATCH https://api.supabase.com/v1/projects/{project_id}/config/auth
+-- Authorization: Bearer {service_role_key}
+-- Content-Type: application/json
+--
+-- Body:
+-- {
+--   "SECURITY_PASSWORD_STRENGTH": true,
+--   "SECURITY_HIBP_ENABLED": true
+-- }
+--
+-- ============================================================================
+-- O QUE ESSA PROTEÇÃO FAZ:
+-- ============================================================================
+--
+-- ✅ Verifica senhas contra banco de dados Have I Been Pwned (HIBP)
+-- ✅ Bloqueia senhas que apareceram em vazamentos públicos
+-- ✅ Força usuários a escolherem senhas mais seguras
+-- ✅ Reduz drasticamente risco de account takeover
+-- ✅ Não armazena a senha - apenas valida via hash SHA-1
+--
+-- ============================================================================
+-- APÓS HABILITAR:
+-- ============================================================================
+--
+-- - Novas senhas fracas/vazadas serão REJEITADAS no sign-up
+-- - Usuários existentes NÃO são afetados (apenas novos cadastros)
+-- - Você pode forçar reset de senha para usuários com senhas fracas
+--
+-- ============================================================================
+
+-- NOTA: As instruções acima devem ser executadas MANUALMENTE no Dashboard.
+-- Não é possível habilitar a proteção contra senhas vazadas via SQL.
