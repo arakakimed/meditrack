@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Patient } from '../types';
+import { useAuth } from '../contexts/AuthContext';
 import AddPatientModal from './AddPatientModal';
 import GlobalRegisterDoseModal from './GlobalRegisterDoseModal';
 import { TAG_COLORS } from './TagManagerModal';
@@ -25,6 +26,9 @@ interface DashboardPageProps {
 }
 
 const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, onAddPatient }) => {
+    const { role } = useAuth();
+    const isAdmin = role === 'Admin';
+
     const [stats, setStats] = useState({
         totalPatients: 0,
         dosesToday: 0,
@@ -170,18 +174,25 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ setView, onViewPatient, o
             </div>
 
             {/* Menu de Ícones */}
-            <div className="grid grid-cols-4 gap-4">
+            <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-2'} gap-4`}>
                 <QuickAction icon="group" label="Pacientes" color="blue" onClick={() => setView('patients')} />
                 <QuickAction icon="calendar_today" label="Agenda" color="indigo" onClick={() => setView('schedule')} />
-                <QuickAction icon="account_balance_wallet" label="Finanças" color="emerald" onClick={() => setView('financials')} />
-                <QuickAction icon="inventory_2" label="Estoque" color="amber" onClick={() => setView('medications')} />
+                {isAdmin && (
+                    <>
+                        <QuickAction icon="account_balance_wallet" label="Finanças" color="emerald" onClick={() => setView('financials')} />
+                        <QuickAction icon="inventory_2" label="Estoque" color="amber" onClick={() => setView('medications')} />
+                    </>
+                )}
             </div>
 
             {/* CARDS EM UMA LINHA (GRID 3 COLUNAS) */}
-            <div className="grid grid-cols-3 gap-4">
+            {/* CARDS EM UMA LINHA (GRID 3 COLUNAS para Admin, 2 para Staff) */}
+            <div className={`grid ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'} gap-4`}>
                 <StatCard icon="vaccines" label="Doses Hoje" value={stats.dosesToday} color="blue" />
                 <StatCard icon="warning" label="Em Atraso" value={stats.delayedDoses} color="rose" />
-                <StatCard icon="attach_money" label="Receita Mês" value={stats.monthlyRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} color="emerald" />
+                {isAdmin && (
+                    <StatCard icon="attach_money" label="Receita Mês" value={stats.monthlyRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} color="emerald" />
+                )}
             </div>
 
             {/* Fila de Atendimento NOVO LAYOUT */}

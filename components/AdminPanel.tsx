@@ -18,15 +18,17 @@ export type View = 'dashboard' | 'patients' | 'schedule' | 'medications' | 'fina
 
 const AdminPanel: React.FC = () => {
     const { signOut, role } = useAuth(); // Pegamos a role aqui
-    const [currentView, setCurrentView] = useState<View>('dashboard');
+
+    // Verifica se é Admin (TitleCase)
+    const isAdmin = role === 'Admin';
+
+    // View inicial: Admin vê dashboard, Staff vê pacientes
+    const [currentView, setCurrentView] = useState<View>(isAdmin ? 'dashboard' : 'patients');
     const [adminViewingPatient, setAdminViewingPatient] = useState<Patient | null>(null);
 
     const [isPatientModalOpen, setIsPatientModalOpen] = useState(false);
     const [isTagModalOpen, setIsTagModalOpen] = useState(false);
     const [patientToEdit, setPatientToEdit] = useState<Patient | undefined>(undefined);
-
-    // Verifica se é Admin (TitleCase)
-    const isAdmin = role === 'Admin';
 
     const handleAddPatient = () => {
         setPatientToEdit(undefined);
@@ -120,25 +122,27 @@ const AdminPanel: React.FC = () => {
                 </div>
                 {/* ... nav ... */}
                 <nav className="flex-1 px-4 space-y-1 overflow-y-auto py-4">
-                    {/* Itens Comuns */}
-                    <SidebarItem icon="dashboard" label="Painel" active={currentView === 'dashboard' && !adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }} />
-                    <SidebarItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
-                    <SidebarItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
-
-                    {/* Itens Exclusivos do Admin */}
+                    {/* Admin: Todos os itens */}
                     {isAdmin && (
                         <>
+                            <SidebarItem icon="dashboard" label="Painel" active={currentView === 'dashboard' && !adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }} />
+                            <SidebarItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
+                            <SidebarItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
                             <SidebarItem icon="medication" label="Medicações" active={currentView === 'medications'} onClick={() => { setAdminViewingPatient(null); setCurrentView('medications'); }} />
                             <SidebarItem icon="payments" label="Financeiro" active={currentView === 'financials'} onClick={() => { setAdminViewingPatient(null); setCurrentView('financials'); }} />
                             <SidebarItem icon="manage_accounts" label="Usuários" active={currentView === 'users'} onClick={() => { setAdminViewingPatient(null); setCurrentView('users'); }} />
+                            <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-700">
+                                <SidebarItem icon="settings" label="Configurações" active={currentView === 'settings'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} />
+                            </div>
                         </>
                     )}
 
-                    {/* Configurações (Só Admin) */}
-                    {isAdmin && (
-                        <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-700">
-                            <SidebarItem icon="settings" label="Configurações" active={currentView === 'settings'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} />
-                        </div>
+                    {/* Staff: Apenas Pacientes e Agenda */}
+                    {!isAdmin && (
+                        <>
+                            <SidebarItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
+                            <SidebarItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
+                        </>
                     )}
                 </nav>
                 <div className="p-4 border-t border-slate-200 dark:border-slate-700">
@@ -154,17 +158,23 @@ const AdminPanel: React.FC = () => {
 
             {/* SIDEBAR MOBILE (Menu Inferior) */}
             <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200 z-50 safe-area-bottom">
-                <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-3'} gap-0.5 px-1 py-1.5`}>
-                    {/* Botões básicos - disponíveis para todos (Admin e Staff) */}
-                    <MobileNavItem icon="dashboard" label="Painel" active={currentView === 'dashboard' && !adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }} />
-                    <MobileNavItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
-                    <MobileNavItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
-
-                    {/* Botões exclusivos do Admin Mobile */}
+                <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-2'} gap-2 px-4 py-3`}>
+                    {/* Admin: Dashboard + Pacientes + Agenda + Finanças + Ajustes */}
                     {isAdmin && (
                         <>
+                            <MobileNavItem icon="dashboard" label="Painel" active={currentView === 'dashboard' && !adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('dashboard'); }} />
+                            <MobileNavItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
+                            <MobileNavItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
                             <MobileNavItem icon="payments" label="Finanças" active={currentView === 'financials'} onClick={() => { setAdminViewingPatient(null); setCurrentView('financials'); }} />
                             <MobileNavItem icon="settings" label="Ajustes" active={currentView === 'settings' || currentView === 'users'} onClick={() => { setAdminViewingPatient(null); setCurrentView('settings'); }} />
+                        </>
+                    )}
+
+                    {/* Staff: Apenas Pacientes + Agenda */}
+                    {!isAdmin && (
+                        <>
+                            <MobileNavItem icon="group" label="Pacientes" active={currentView === 'patients' || !!adminViewingPatient} onClick={() => { setAdminViewingPatient(null); setCurrentView('patients'); }} />
+                            <MobileNavItem icon="calendar_month" label="Agenda" active={currentView === 'schedule'} onClick={() => { setAdminViewingPatient(null); setCurrentView('schedule'); }} />
                         </>
                     )}
                 </div>
